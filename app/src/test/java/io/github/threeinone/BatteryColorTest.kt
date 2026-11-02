@@ -64,9 +64,12 @@ class BatteryColorTest {
     }
 
     @Test fun ensureVisibleLiftsNearInvisibleColor() {
-        val lifted = IndicatorConfig.ensureVisible(Color.argb(255, 128, 128, 128))
+        // Light grey ~0.78 is nearly indistinguishable from the 0.78 reference background;
+        // ensureVisible must mix it toward black/white until it clears the 1.2:1 floor.
+        val nearInvisible = Color.argb(255, 198, 198, 198)
+        val lifted = IndicatorConfig.ensureVisible(nearInvisible)
         assertEquals(255, Color.alpha(lifted))
-        assertTrue("Mid-grey must be lifted off the background", lifted != Color.argb(255, 128, 128, 128))
+        assertTrue("Near-reference grey must be lifted off the background", lifted != nearInvisible)
     }
 
     @Test fun vpnShieldDrawnWhenEnabledAndActive() {

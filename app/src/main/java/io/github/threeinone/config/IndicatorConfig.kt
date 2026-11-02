@@ -1,7 +1,6 @@
 package io.github.threeinone.config
 
 import android.content.SharedPreferences
-import android.graphics.Color
 import io.github.threeinone.model.BatteryPhase
 import io.github.threeinone.model.IndicatorState
 
@@ -118,16 +117,16 @@ data class IndicatorConfig(
 // in SharedPreferences; only the drawn colour moves.
 private data class Rgb(val r: Double, val g: Double, val b: Double)
 private fun toRgb(color: Int): Rgb = Rgb(
-    Color.red(color) / 255.0,
-    Color.green(color) / 255.0,
-    Color.blue(color) / 255.0
+    (color shr 16 and 0xFF) / 255.0,
+    (color shr 8 and 0xFF) / 255.0,
+    (color and 0xFF) / 255.0
 )
-private fun rgbToInt(c: Rgb): Int = Color.argb(
-    255,
-    (c.r * 255).toInt().coerceIn(0, 255),
-    (c.g * 255).toInt().coerceIn(0, 255),
-    (c.b * 255).toInt().coerceIn(0, 255)
-)
+private fun rgbToInt(c: Rgb): Int {
+    val r = (c.r * 255).toInt().coerceIn(0, 255)
+    val g = (c.g * 255).toInt().coerceIn(0, 255)
+    val b = (c.b * 255).toInt().coerceIn(0, 255)
+    return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+}
 private fun linear(c: Double) = if (c <= 0.04045) c / 12.92 else Math.pow((c + 0.055) / 1.055, 2.4)
 private fun relLum(c: Rgb) = 0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b)
 private fun contrast(a: Rgb, b: Rgb): Double {
