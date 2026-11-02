@@ -27,6 +27,8 @@ class SystemStateSource(
     private var proxy: Any? = null
     private var running = false
     private var lastBatteryLog = ""
+    private var lastWifiRx = -1L
+    private var lastWifiTx = -1L
     private var receiverRegistered = false
     private var connectivityRegistered = false
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
@@ -132,30 +134,42 @@ class SystemStateSource(
         val wifiPhase = WifiStatus.phase(bool(wifi, "enabled"), bool(wifi, "isTransient"),
             bool(wifi, "connected"), caps)
         val phone = context.getSystemService(TelephonyManager::class.java)
-        val subId = SubscriptionManager.getDefaultDataSubscriptionId()
+        val defaultSubId = SubscriptionManager.getDefaultDataSubscriptionId()
         val subscriptions = context.getSystemService(SubscriptionManager::class.java).activeSubscriptionInfoList.orEmpty()
-        val selected = subscriptions.firstOrNull { it.subscriptionId == subId }
         @Suppress("UNCHECKED_CAST")
         val mobiles = field(controller, "mMobileSignalControllers") as SparseArray<Any>
-        val mobile = mobiles[subId]?.let { field(it, "mCurrentState") }
-        val subPhone = if (SubscriptionManager.isValidSubscriptionId(subId)) phone.createForSubscriptionId(subId) else phone
         val simStates = (0 until phone.activeModemCount.coerceAtLeast(1)).map { phone.getSimState(it) }
-        val simState = selected?.let { phone.getSimState(it.simSlotIndex) }
         val locked = setOf(TelephonyManager.SIM_STATE_PIN_REQUIRED, TelephonyManager.SIM_STATE_PUK_REQUIRED,
             TelephonyManager.SIM_STATE_NETWORK_LOCKED, TelephonyManager.SIM_STATE_PERM_DISABLED)
-        val service = mobile?.let { field(it, "serviceState") as? ServiceState }
-        val phase = when {
-            simState in locked || (selected == null && simStates.any { it in locked }) -> SimPhase.LOCKED
-            simStates.all { it == TelephonyManager.SIM_STATE_ABSENT } -> SimPhase.ABSENT
-            selected == null && simStates.any { it == TelephonyManager.SIM_STATE_READY } -> SimPhase.DISABLED
-            selected == null -> SimPhase.UNKNOWN
-            mobile == null -> SimPhase.UNKNOWN
-            bool(mobile, "isEmergency") -> SimPhase.EMERGENCY
-            service == null -> SimPhase.UNKNOWN
-            service.state != ServiceState.STATE_IN_SERVICE && !bool(mobile, "connected") -> SimPhase.NO_SIGNAL
-            else -> SimPhase.READY
-        }
+        val wifiActivity = readWifiActivity(wifiPhase)
+
+        // Default-data-SIM state (drives the legacy single-SIM rendering path).
+        val selected = subscriptions.firstOrNull { it.subscriptionId == defaultSubId }
+        val mobile = mobiles[defaultSubId]?.let { field(it, "mCurrentState") }
+        val subPhone = if (SubscriptionManager.isValidSubscriptionId(defaultSubId)) phone.createForSubscriptionId(defaultSubId) else phone
+        val simState = selected?.let { phone.getSimState(it.simSlotIndex) }
+        val phase = simPhaseFor(selected, mobile, simStates, locked, simState)
         val display = mobile?.let { field(it, "telephonyDisplayInfo") as? TelephonyDisplayInfo }
+        val mobileActivity = mobileActivity(subPhone, defaultSubId)
+
+        // Per-SIM state for the dual-SIM rings / activity arrows (SuperIcon port).
+        val sims = subscriptions.mapNotNull { sub ->
+            val id = sub.subscriptionId
+            val mc = mobiles[id]?.let { field(it, "mCurrentState") }
+            val subPhase = simPhaseFor(sub, mc, simStates, locked, phone.getSimState(sub.simSlotIndex))
+            val subDisplay = mc?.let { field(it, "telephonyDisplayInfo") as? TelephonyDisplayInfo }
+            IndicatorSim(
+                slot = sub.simSlotIndex,
+                phase = subPhase,
+                level = mc?.let { number(it, "level").coerceIn(0, 4) } ?: 0,
+                roaming = mc?.let { bool(it, "roaming") } ?: false,
+                dataEnabled = runCatching { phone.createForSubscriptionId(id).isDataEnabled }.getOrDefault(false),
+                networkType = IndicatorState.networkLabel(subDisplay?.networkType ?: 0, subDisplay?.overrideNetworkType ?: 0),
+                dataDefault = id == defaultSubId,
+                activity = if (id == defaultSubId) mobileActivity else DataActivity.NONE
+            )
+        }
+
         val vpn = runCatching {
             connectivity.allNetworks.any { n ->
                 connectivity.getNetworkCapabilities(n)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
@@ -171,9 +185,71 @@ class SystemStateSource(
             roaming = mobile?.let { bool(it, "roaming") } ?: false,
             vpn = vpn,
             networkReady = phase != SimPhase.UNKNOWN || Settings.Global.getInt(
-                context.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) != 0
+                context.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) != 0,
+            sims = sims,
+            wifiActivity = wifiActivity,
+            mobileActivity = mobileActivity
         )
         changed(current)
+    }
+
+    private fun simPhaseFor(selected: SubscriptionInfo?, mobile: Any?, simStates: List<Int>, locked: Set<Int>, simState: Int?): SimPhase {
+        return when {
+            simState in locked || (selected == null && simStates.any { it in locked }) -> SimPhase.LOCKED
+            simStates.all { it == TelephonyManager.SIM_STATE_ABSENT } -> SimPhase.ABSENT
+            selected == null && simStates.any { it == TelephonyManager.SIM_STATE_READY } -> SimPhase.DISABLED
+            selected == null -> SimPhase.UNKNOWN
+            mobile == null -> SimPhase.UNKNOWN
+            bool(mobile, "isEmergency") -> SimPhase.EMERGENCY
+            else -> {
+                val service = mobile?.let { field(it, "serviceState") as? ServiceState }
+                if (service == null) SimPhase.UNKNOWN
+                else if (service.state != ServiceState.STATE_IN_SERVICE && !bool(mobile, "connected")) SimPhase.NO_SIGNAL
+                else SimPhase.READY
+            }
+        }
+    }
+
+    private fun mobileActivity(phone: TelephonyManager, subId: Int): DataActivity {
+        val da = runCatching {
+            if (SubscriptionManager.isValidSubscriptionId(subId)) phone.createForSubscriptionId(subId).dataActivity
+            else phone.dataActivity
+        }.getOrDefault(0)
+        return when (da) {
+            TelephonyManager.DATA_ACTIVITY_IN -> DataActivity.IN
+            TelephonyManager.DATA_ACTIVITY_OUT -> DataActivity.OUT
+            TelephonyManager.DATA_ACTIVITY_INOUT -> DataActivity.BOTH
+            else -> DataActivity.NONE
+        }
+    }
+
+    private fun readWifiActivity(wifiPhase: WifiPhase): DataActivity {
+        if (wifiPhase != WifiPhase.CONNECTED && wifiPhase != WifiPhase.NO_INTERNET && wifiPhase != WifiPhase.CAPTIVE) {
+            lastWifiRx = -1; lastWifiTx = -1
+            return DataActivity.NONE
+        }
+        // getRxBytes/getTxBytes are hidden in the compile SDK but present at runtime on ColorOS;
+        // read them reflectively to derive instantaneous Wi-Fi traffic direction.
+        val (rx, tx) = runCatching {
+            val info = context.getSystemService(WifiManager::class.java).connectionInfo
+            if (info != null) {
+                val c = info.javaClass
+                val rxB = c.getMethod("getRxBytes").invoke(info) as? Long
+                val txB = c.getMethod("getTxBytes").invoke(info) as? Long
+                (rxB ?: -1L) to (txB ?: -1L)
+            } else (-1L) to (-1L)
+        }.getOrDefault((-1L) to (-1L))
+        val result = if (rx >= 0 && tx >= 0 && lastWifiRx >= 0) {
+            val din = rx > lastWifiRx; val dout = tx > lastWifiTx
+            when {
+                din && dout -> DataActivity.BOTH
+                din -> DataActivity.IN
+                dout -> DataActivity.OUT
+                else -> DataActivity.NONE
+            }
+        } else DataActivity.NONE
+        lastWifiRx = rx; lastWifiTx = tx
+        return result
     }
 
     private fun field(obj: Any, name: String): Any? = XposedHelpers.getObjectField(obj, name)

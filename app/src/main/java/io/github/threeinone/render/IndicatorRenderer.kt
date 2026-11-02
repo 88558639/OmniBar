@@ -102,18 +102,29 @@ class IndicatorRenderer {
             if (state.airplane) {
                 airplane(canvas, tint)
             } else if (state.sim == SimPhase.READY || state.sim == SimPhase.NO_SIGNAL) {
-                for (i in 0..3) {
-                    val x = 50f + (i - 1.5f) * 13f * config.dotSpacing / 100f
-                    val y = if (i == 0 || i == 3) 83f else 88f
-                    fill(tint, if (i < state.dots) 255 else 55)
-                    canvas.drawCircle(x, y, 4.2f * config.dotScale / 100f, paint)
+                if (config.dualSim && state.sims.isNotEmpty()) {
+                    drawSignalRings(canvas, state, config, tint)
+                } else {
+                    for (i in 0..3) {
+                        val x = 50f + (i - 1.5f) * 13f * config.dotSpacing / 100f
+                        val y = if (i == 0 || i == 3) 83f else 88f
+                        val color = if (state.roaming) config.roamingColor else tint
+                        fill(color, if (i < state.dots) 255 else 55)
+                        canvas.drawCircle(x, y, 4.2f * config.dotScale / 100f, paint)
+                    }
+                    if (state.sim == SimPhase.NO_SIGNAL) text(canvas, "×", 50f, 94f, 13f, tint)
                 }
-                if (state.sim == SimPhase.NO_SIGNAL) text(canvas, "×", 50f, 94f, 13f, tint)
             } else {
                 simMark(canvas, state.sim, tint)
             }
-            if (state.roaming && !state.airplane) text(canvas, "R", 78f, 76f, 9f, tint)
-            if (config.showVpn && state.vpn) drawVpn(canvas, tint)
+            if (config.showActivity) {
+                val act = if (state.wifiConnected || state.wifi == WifiPhase.CONNECTING) state.wifiActivity else state.mobileActivity
+                drawActivityArrows(canvas, act, tint)
+            }
+            if (state.roaming && !state.airplane) {
+                text(canvas, "R", if (config.swap) 22f else 78f, 76f, 9f, config.roamingColor)
+            }
+            if (config.showVpn && state.vpn) drawVpn(canvas, tint, config.swap)
             if (state.battery < 0 && !showNumber) text(canvas, "?", 50f, 26f, 12f, tint)
         } finally {
             canvas.restoreToCount(save)
@@ -156,9 +167,10 @@ class IndicatorRenderer {
         } finally { c.restoreToCount(save) }
     }
 
-    private fun drawVpn(c: Canvas, color: Int) {
+    private fun drawVpn(c: Canvas, color: Int, swap: Boolean = false) {
         val save = c.save()
         try {
+            if (swap) c.scale(-1f, 1f, 50f, 50f)
             stroke(color, 2.6f)
             path.reset()
             path.moveTo(80f, 14f); path.lineTo(92f, 14f); path.lineTo(92f, 21f)
@@ -168,6 +180,42 @@ class IndicatorRenderer {
             path.moveTo(83f, 20f); path.lineTo(85.5f, 22.5f); path.lineTo(89.5f, 17.5f)
             c.drawPath(path, paint)
         } finally { c.restoreToCount(save) }
+    }
+
+    /**
+     * Dual-SIM signal rings (SuperIcon port). Draws up to two concentric rows of four arc
+     * segments filling the battery ring's bottom gap — outer row = default data SIM, inner
+     * row = secondary SIM. Falls back to the single-SIM four-dot layout when [IndicatorConfig.dualSim]
+     * is off (see call site).
+     */
+    private fun drawSignalRings(c: Canvas, state: IndicatorState, config: IndicatorConfig, tint: Int) {
+        val centerX = 50f; val centerY = 47f
+        state.sims.take(2).forEachIndexed { row, sim ->
+            val radius = if (row == 0) 39f else 32f
+            val line = 2.4f * config.stroke / 120f
+            val count = 4
+            val gap = 18f
+            val step = (148f - gap * (count - 1)) / count
+            val color = if (sim.roaming) config.roamingColor else tint
+            for (i in 0 until count) {
+                val a = 32f + i * (step + gap)
+                stroke(color, line, if (i < sim.dots) 255 else 55)
+                bounds.set(centerX - radius, centerY - radius, centerX + radius, centerY + radius)
+                c.drawArc(bounds, a, step, false, paint)
+            }
+        }
+    }
+
+    /** Up/down traffic arrows: down = receiving (IN), up = transmitting (OUT). */
+    private fun drawActivityArrows(c: Canvas, act: DataActivity, tint: Int) {
+        stroke(tint, 2.2f, if (act.hasIn) 255 else 70)
+        path.reset()
+        path.moveTo(38f, 55f); path.lineTo(42f, 60f); path.lineTo(46f, 55f)
+        c.drawPath(path, paint)
+        stroke(tint, 2.2f, if (act.hasOut) 255 else 70)
+        path.reset()
+        path.moveTo(54f, 61f); path.lineTo(58f, 56f); path.lineTo(62f, 61f)
+        c.drawPath(path, paint)
     }
 
     private fun mobileDataOff(c: Canvas, color: Int) {

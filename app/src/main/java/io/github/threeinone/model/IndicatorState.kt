@@ -4,6 +4,30 @@ enum class BatteryPhase { NORMAL, CHARGING, FULL, PAUSED, UNKNOWN }
 enum class WifiPhase { OFF, DISCONNECTED, CONNECTING, CONNECTED, NO_INTERNET, CAPTIVE }
 enum class SimPhase { READY, NO_SIGNAL, EMERGENCY, ABSENT, DISABLED, LOCKED, UNKNOWN }
 
+/**
+ * Data-traffic activity, matching Android's [android.telephony.TelephonyManager] data-activity
+ * constants (NONE=0, IN=1, OUT=2, INOUT=3) so reflection values can be mapped directly.
+ */
+enum class DataActivity(val bits: Int) {
+    NONE(0), IN(1), OUT(2), BOTH(3);
+    val hasIn get() = bits and 1 != 0   // receiving / download
+    val hasOut get() = bits and 2 != 0  // transmitting / upload
+}
+
+/** A single SIM/cellular subscription's render-relevant state. */
+data class IndicatorSim(
+    val slot: Int = 0,
+    val phase: SimPhase = SimPhase.UNKNOWN,
+    val level: Int = 0,
+    val roaming: Boolean = false,
+    val dataEnabled: Boolean = false,
+    val networkType: String = "",
+    val dataDefault: Boolean = false,
+    val activity: DataActivity = DataActivity.NONE
+) {
+    val dots get() = if (phase == SimPhase.READY) level.coerceIn(0, 4) else 0
+}
+
 data class IndicatorState(
     val battery: Int = -1,
     val batteryPhase: BatteryPhase = BatteryPhase.UNKNOWN,
@@ -18,7 +42,11 @@ data class IndicatorState(
     val airplane: Boolean = false,
     val vpn: Boolean = false,
     val networkReady: Boolean = false,
-    val batteryObserved: Boolean = false
+    val batteryObserved: Boolean = false,
+    // --- SuperIcon port: dual-SIM + traffic activity (default off / unchanged rendering) ---
+    val sims: List<IndicatorSim> = emptyList(),
+    val wifiActivity: DataActivity = DataActivity.NONE,
+    val mobileActivity: DataActivity = DataActivity.NONE
 ) {
     val wifiConnected get() = wifi in setOf(WifiPhase.CONNECTED, WifiPhase.NO_INTERNET, WifiPhase.CAPTIVE)
     val ready get() = networkReady && batteryObserved
@@ -53,6 +81,7 @@ data class IndicatorState(
         })
         if (roaming) append("，漫游")
         if (vpn) append("，VPN")
+        if (sims.size > 1) append("，双卡")
     }
 
     companion object {
@@ -82,7 +111,15 @@ data class IndicatorState(
             "飞行模式" to demo.copy(wifi = WifiPhase.OFF, airplane = true),
             "飞行模式 · Wi-Fi" to demo.copy(airplane = true),
             "漫游" to demo.copy(wifi = WifiPhase.OFF, roaming = true),
-            "VPN" to demo.copy(vpn = true)
+            "VPN" to demo.copy(vpn = true),
+            "双卡信号" to demo.copy(
+                sims = listOf(
+                    IndicatorSim(slot = 0, phase = SimPhase.READY, level = 4, dataDefault = true),
+                    IndicatorSim(slot = 1, phase = SimPhase.READY, level = 2, roaming = true)
+                )
+            ),
+            "数据上下行" to demo.copy(wifi = WifiPhase.OFF, networkType = "5G",
+                mobileActivity = DataActivity.BOTH)
         )
         fun networkLabel(type: Int, overrideType: Int): String = when {
             type == 20 || overrideType in setOf(3, 4, 5) -> "5G"
