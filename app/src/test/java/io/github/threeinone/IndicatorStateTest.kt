@@ -22,7 +22,9 @@ class IndicatorStateTest {
         val lowSaver = demo.copy(battery = 12, powerSave = true)
         assertEquals(config.chargingColor, config.batteryColor(lowSaver.copy(batteryPhase = BatteryPhase.CHARGING), 123))
         assertEquals(config.lowColor, config.batteryColor(lowSaver, 123))
-        assertEquals(config.saverColor, config.batteryColor(lowSaver.copy(battery = 21), 123))
+        // saverColor (#FFB300) has <1.2:1 worst-case contrast, so ensureVisible lifts it;
+        // the drawn colour is the lifted value, not the raw preference.
+        assertEquals(IndicatorConfig.ensureVisible(config.saverColor), config.batteryColor(lowSaver.copy(battery = 21), 123))
         assertEquals(config.lowColor, config.batteryColor(demo.copy(battery = 20), 123))
         assertEquals(123, config.batteryColor(demo.copy(battery = 21), 123))
         assertEquals(123, config.copy(colors = false).batteryColor(lowSaver, 123))

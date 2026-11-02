@@ -88,18 +88,20 @@ class BatteryColorTest {
         val bitmap = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888)
         IndicatorRenderer().draw(Canvas(bitmap), 300f, 300f,
             IndicatorState.demo.copy(vpn = true), IndicatorConfig(showVpn = true), Color.WHITE)
-        assertTrue("VPN shield should be drawn", hasInk(bitmap, 246, 270, 48, 72))
+        // Shield spans normalised x[80,92] y[14,28] -> pixels x[240,276] y[42,84]; sample the
+        // whole outline (left/right edges sit at x≈240/276, outside the inner glyph).
+        assertTrue("VPN shield should be drawn", hasInk(bitmap, 234, 282, 36, 88))
     }
 
     @Test fun vpnShieldSkippedWhenDisabled() {
         val bitmap = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888)
         IndicatorRenderer().draw(Canvas(bitmap), 300f, 300f,
             IndicatorState.demo.copy(vpn = true), IndicatorConfig(showVpn = false), Color.WHITE)
-        assertFalse("VPN shield must be skipped when disabled", hasInk(bitmap, 246, 270, 48, 72))
+        assertFalse("VPN shield must be skipped when disabled", hasInk(bitmap, 234, 282, 36, 88))
     }
 
     private fun hasInk(bitmap: Bitmap, x0: Int, x1: Int, y0: Int, y1: Int): Boolean {
-        for (y in y0..y1 step 3) for (x in x0..x1 step 3) {
+        for (y in y0..y1 step 2) for (x in x0..x1 step 2) {
             if (Color.alpha(bitmap.getPixel(x, y)) > 0) return true
         }
         return false
