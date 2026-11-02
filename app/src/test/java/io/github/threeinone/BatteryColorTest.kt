@@ -85,25 +85,36 @@ class BatteryColorTest {
     }
 
     @Test fun vpnShieldDrawnWhenEnabledAndActive() {
-        val bitmap = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888)
-        IndicatorRenderer().draw(Canvas(bitmap), 300f, 300f,
-            IndicatorState.demo.copy(vpn = true), IndicatorConfig(showVpn = true), Color.WHITE)
-        // Shield spans normalised x[80,92] y[14,28] -> pixels x[240,276] y[42,84]; sample the
-        // whole outline (left/right edges sit at x≈240/276, outside the inner glyph).
-        assertTrue("VPN shield should be drawn", hasInk(bitmap, 234, 282, 36, 88))
+        val on = render(IndicatorState.demo.copy(vpn = true), IndicatorConfig(showVpn = true))
+        val off = render(IndicatorState.demo.copy(vpn = true), IndicatorConfig(showVpn = false))
+        val onInk = topRightInk(on)
+        val offInk = topRightInk(off)
+        assertTrue("VPN shield should add ink in the top-right (onInk=$onInk offInk=$offInk)",
+            onInk > offInk + 50)
     }
 
     @Test fun vpnShieldSkippedWhenDisabled() {
-        val bitmap = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888)
-        IndicatorRenderer().draw(Canvas(bitmap), 300f, 300f,
-            IndicatorState.demo.copy(vpn = true), IndicatorConfig(showVpn = false), Color.WHITE)
-        assertFalse("VPN shield must be skipped when disabled", hasInk(bitmap, 234, 282, 36, 88))
+        val off = render(IndicatorState.demo.copy(vpn = true), IndicatorConfig(showVpn = false))
+        val base = render(IndicatorState.demo.copy(vpn = false), IndicatorConfig(showVpn = true))
+        val offInk = topRightInk(off)
+        val baseInk = topRightInk(base)
+        assertTrue("Shield must not appear when disabled (offInk=$offInk baseInk=$baseInk)",
+            offInk <= baseInk + 5)
     }
 
-    private fun hasInk(bitmap: Bitmap, x0: Int, x1: Int, y0: Int, y1: Int): Boolean {
-        for (y in y0..y1 step 2) for (x in x0..x1 step 2) {
-            if (Color.alpha(bitmap.getPixel(x, y)) > 0) return true
+    private fun render(state: IndicatorState, config: IndicatorConfig): Bitmap {
+        val b = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888)
+        IndicatorRenderer().draw(Canvas(b), 300f, 300f, state, config, Color.WHITE)
+        return b
+    }
+
+    // Count ink pixels in the top-right corner (x in [200,300), y in [0,110)) — the VPN shield
+    // lives there; the battery ring's nearest arc sits left of x=235, so this isolates the shield.
+    private fun topRightInk(b: Bitmap): Int {
+        var c = 0
+        for (y in 0 until 110) for (x in 200 until 300) {
+            if (Color.alpha(b.getPixel(x, y)) > 0) c++
         }
-        return false
+        return c
     }
 }
