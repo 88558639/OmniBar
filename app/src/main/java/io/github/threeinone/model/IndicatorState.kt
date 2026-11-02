@@ -81,6 +81,13 @@ data class IndicatorState(
         })
         if (roaming) append("，漫游")
         if (vpn) append("，VPN")
+        if (!airplane && mobileActivity != DataActivity.NONE) append(
+            "，" + when {
+                mobileActivity.hasIn && mobileActivity.hasOut -> "上下行"
+                mobileActivity.hasIn -> "下行"
+                else -> "上行"
+            }
+        )
         if (sims.size > 1) append("，双卡")
     }
 
