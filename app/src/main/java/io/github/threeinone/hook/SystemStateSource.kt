@@ -157,14 +157,8 @@ class SystemStateSource(
         }
         val display = mobile?.let { field(it, "telephonyDisplayInfo") as? TelephonyDisplayInfo }
         val vpn = runCatching {
-            val active = connectivity.activeNetwork
-            if (active != null && connectivity.getNetworkCapabilities(active)
-                    ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VPN) == true) {
-                true
-            } else {
-                connectivity.allNetworks.any { n ->
-                    connectivity.getNetworkCapabilities(n)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
-                }
+            connectivity.allNetworks.any { n ->
+                connectivity.getNetworkCapabilities(n)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
             }
         }.getOrDefault(false)
         current = current.copy(
