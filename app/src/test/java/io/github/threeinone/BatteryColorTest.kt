@@ -46,11 +46,23 @@ class BatteryColorTest {
         assertEquals(charging, cfg.batteryColor(s, Color.WHITE))
     }
 
-    @Test fun criticalThresholdCannotExceedLowThreshold() {
-        // Misconfigured (critical > low) must not make low unreachable.
+    @Test fun criticalBandSitsBelowLowBand() {
+        val cfg = IndicatorConfig(criticalThreshold = 10, lowThreshold = 20)
+        val crit = IndicatorState.demo.copy(battery = 8, batteryPhase = BatteryPhase.NORMAL)
+        val lowS = IndicatorState.demo.copy(battery = 15, batteryPhase = BatteryPhase.NORMAL)
+        val normal = IndicatorState.demo.copy(battery = 25, batteryPhase = BatteryPhase.NORMAL)
+        assertEquals(critical, cfg.batteryColor(crit, Color.WHITE))
+        assertEquals(low, cfg.batteryColor(lowS, Color.WHITE))
+        assertEquals(Color.WHITE, cfg.batteryColor(normal, Color.WHITE))
+    }
+
+    @Test fun criticalThresholdCappedWhenAboveLow() {
+        // Misconfiguration (critical > low) must not crash and stays deterministic.
         val cfg = IndicatorConfig(criticalThreshold = 25, lowThreshold = 20)
-        val s = IndicatorState.demo.copy(battery = 22, batteryPhase = BatteryPhase.NORMAL)
-        assertEquals(low, cfg.batteryColor(s, Color.WHITE))
+        val below = IndicatorState.demo.copy(battery = 5, batteryPhase = BatteryPhase.NORMAL)
+        val above = IndicatorState.demo.copy(battery = 22, batteryPhase = BatteryPhase.NORMAL)
+        assertEquals(critical, cfg.batteryColor(below, Color.WHITE))
+        assertEquals(Color.WHITE, cfg.batteryColor(above, Color.WHITE))
     }
 
     @Test fun colorsDisabledFallsBackToTint() {
