@@ -207,7 +207,15 @@ class SystemStateSource(
                 TelephonyCallback.ServiceStateListener {
                 override fun onSignalStrengthsChanged(s: SignalStrength) {
                     val level = s.level.coerceIn(0, 4)
-                    updateSim(id) { it.copy(level = level) }
+                    updateSim(id) { current ->
+                        // A non-zero level means the radio has a live signal. Some firmwares
+                        // report a stale/out-of-service ServiceState while the bearer is up,
+                        // so the strength is the more reliable indicator here.
+                        val phase = if (level > 0 && current.phase != SimPhase.ABSENT &&
+                            current.phase != SimPhase.LOCKED
+                        ) SimPhase.READY else current.phase
+                        current.copy(level = level, phase = phase)
+                    }
                     schedule()
                 }
 
@@ -232,12 +240,15 @@ class SystemStateSource(
 
                 override fun onServiceStateChanged(serviceState: ServiceState) {
                     simServices[id] = serviceState
-                    val phase = if (serviceState.state == ServiceState.STATE_IN_SERVICE) {
-                        SimPhase.READY
-                    } else {
-                        SimPhase.NO_SIGNAL
+                    updateSim(id) { current ->
+                        val phase = when {
+                            serviceState.state == ServiceState.STATE_IN_SERVICE -> SimPhase.READY
+                            // Keep READY while the radio still reports signal strength.
+                            current.level > 0 -> SimPhase.READY
+                            else -> SimPhase.NO_SIGNAL
+                        }
+                        current.copy(phase = phase, roaming = serviceState.roaming)
                     }
-                    updateSim(id) { it.copy(phase = phase, roaming = serviceState.roaming) }
                     schedule()
                 }
             }
