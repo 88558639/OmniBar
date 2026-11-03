@@ -88,6 +88,16 @@ class SystemStateSource(
      * declared by `android.os.OplusBatteryManager` (`fast_chg_type`, `pps_chg_mode`,
      * `chargefastcharger`, `chargervoltage`, …).
      */
+    /** Fires whenever a SIM is added, removed, enabled or disabled (SuperIcon's approach). */
+    private val subListener = object : SubscriptionManager.OnSubscriptionsChangedListener() {
+        override fun onSubscriptionsChanged() {
+            handler.post {
+                refreshSubscriptions()
+                schedule()
+            }
+        }
+    }
+
     private val oplusReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {
             if (intent == null) return
@@ -164,6 +174,9 @@ class SystemStateSource(
                 }
                 // The user moved the data card between slots.
                 ACTION_DEFAULT_DATA_SUBSCRIPTION_CHANGED -> schedule()
+                // A card was enabled, disabled or removed.
+                ACTION_SIM_STATE_CHANGED,
+                ACTION_SUBSCRIPTION_CARRIER_IDENTITY_CHANGED -> schedule()
             }
         }
     }
@@ -185,6 +198,7 @@ class SystemStateSource(
     private val activityPoll = object : Runnable {
         private var lastRx = -1L
         private var lastTx = -1L
+        private var tick = 0
         override fun run() {
             if (!running) return
             val rx = TrafficStats.getTotalRxBytes()
@@ -201,6 +215,9 @@ class SystemStateSource(
             } else DataActivity.NONE
             lastRx = rx
             lastTx = tx
+            // Re-read the subscriptions now and then so a card that was switched off
+            // disappears from the indicator even if no telephony callback arrives.
+            if (tick++ % 4 == 0) buildCurrent()
             current = current.copy(
                 wifiActivity = if (current.wifiConnected) traffic else DataActivity.NONE,
                 mobileActivity = maxOf(current.mobileActivity, traffic)
@@ -222,6 +239,8 @@ class SystemStateSource(
             addAction(android.os.PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
             addAction(Intent.ACTION_AIRPLANE_MODE_CHANGED)
             addAction(ACTION_DEFAULT_DATA_SUBSCRIPTION_CHANGED)
+            addAction(ACTION_SIM_STATE_CHANGED)
+            addAction(ACTION_SUBSCRIPTION_CARRIER_IDENTITY_CHANGED)
         }, Context.RECEIVER_EXPORTED)
         // Oplus' own battery broadcast carries the negotiated charging protocol.
         runCatching {
@@ -245,6 +264,8 @@ class SystemStateSource(
         current = current.copy(powerSave = power.isPowerSaveMode, airplane = isAirplane())
 
         registerSignalListeners()
+        runCatching { subs.addOnSubscriptionsChangedListener(executor, subListener) }
+            .onFailure { XposedBridge.log("3IN1: subscription listener unavailable: $it") }
         schedule()
         handler.postDelayed(activityPoll, 1500)
     }
@@ -258,6 +279,7 @@ class SystemStateSource(
         runCatching { connectivity.unregisterNetworkCallback(netCallback) }
         simCallbacks.values.forEach { (tm, cb) -> runCatching { tm.unregisterTelephonyCallback(cb) } }
         simCallbacks.clear()
+        runCatching { subs.removeOnSubscriptionsChangedListener(subListener) }
         simStates.clear()
         simServices.clear()
     }
@@ -451,6 +473,11 @@ class SystemStateSource(
         /** Broadcast sent when the user moves the data card between slots. */
         const val ACTION_DEFAULT_DATA_SUBSCRIPTION_CHANGED =
             "android.intent.action.ACTION_DEFAULT_DATA_SUBSCRIPTION_CHANGED"
+
+        /** Broadcast sent when a SIM card is enabled, disabled or removed. */
+        const val ACTION_SIM_STATE_CHANGED = "android.telephony.action.SIM_STATE_CHANGED"
+        const val ACTION_SUBSCRIPTION_CARRIER_IDENTITY_CHANGED =
+            "android.telephony.action.SUBSCRIPTION_CARRIER_IDENTITY_CHANGED"
 
         /**
          * `BatteryManager.EXTRA_MAX_CHARGING_CURRENT` / `EXTRA_MAX_CHARGING_VOLTAGE` are

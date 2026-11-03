@@ -45,8 +45,8 @@ class IndicatorRenderer {
         /** Widest the number may get before it would touch the signal dots. */
         const val NUMBER_MAX_WIDTH = 60f
 
-        /** Colour of an unlit signal dot — a light grey that reads as an empty slot. */
-        const val DOT_EMPTY_COLOR = 0xFFBDBDBD.toInt()
+        /** Alpha of an unlit signal dot — faint enough to read as an empty slot. */
+        const val DOT_EMPTY_ALPHA = 38
     }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -143,22 +143,25 @@ class IndicatorRenderer {
         if (state.airplane) return
         val angles = floatArrayOf(-33f * spread, -11f * spread, 11f * spread, 33f * spread)
 
-        val mainSim = state.sims.firstOrNull { it.dataDefault } ?: state.sims.firstOrNull()
-        val secondarySim = state.sims.firstOrNull { !it.dataDefault } ?: state.sims.getOrNull(1)
-        val mainLevel = if (state.sim == SimPhase.READY) state.mobileLevel.coerceIn(0, 4) else 0
+        // Card 1 (the lower SIM slot) is the main card on the left, card 2 on the right —
+        // the same slot ordering SuperIcon uses.
+        val ordered = state.sims.sortedBy { it.slot }
+        val mainSim = ordered.firstOrNull()
+        val secondarySim = ordered.getOrNull(1)
+        val mainLevel = mainSim?.let {
+            if (it.phase == SimPhase.READY) it.level.coerceIn(0, 4) else 0
+        } ?: if (state.sim == SimPhase.READY) state.mobileLevel.coerceIn(0, 4) else 0
         val mainColor = if (state.roaming || (mainSim?.roaming == true)) config.roamingColor else tint
 
-        if (config.dualSim && secondarySim != null) {
-            val secondaryLevel = if (secondarySim.phase == SimPhase.READY) {
-                secondarySim.level.coerceIn(0, 4)
-            } else 0
-            val secondaryColor = if (secondarySim.roaming) config.roamingColor else tint
-            drawDotSide(canvas, angles, -1f, ringRadius, dotRadius, mainLevel, mainColor)
-            drawDotSide(canvas, angles, 1f, ringRadius, dotRadius, secondaryLevel, secondaryColor)
-        } else {
-            drawDotSide(canvas, angles, -1f, ringRadius, dotRadius, mainLevel, mainColor)
-            drawDotSide(canvas, angles, 1f, ringRadius, dotRadius, mainLevel, mainColor)
-        }
+        // The left half always belongs to card 1, the right half to card 2. A card that is
+        // switched off — or the dual-card view being disabled — leaves its column empty
+        // instead of mirroring the other card.
+        drawDotSide(canvas, angles, -1f, ringRadius, dotRadius, mainLevel, mainColor)
+        val secondaryLevel = if (config.dualSim && secondarySim != null) {
+            if (secondarySim.phase == SimPhase.READY) secondarySim.level.coerceIn(0, 4) else 0
+        } else 0
+        val secondaryColor = if (secondarySim?.roaming == true) config.roamingColor else tint
+        drawDotSide(canvas, angles, 1f, ringRadius, dotRadius, secondaryLevel, secondaryColor)
     }
 
     /** One half of the ring; [dir] is -1 for the left side and +1 for the right. */
@@ -170,9 +173,9 @@ class IndicatorRenderer {
             val rad = Math.toRadians(angles[i].toDouble())
             val x = 50f + dir * radius * Math.cos(rad).toFloat()
             val y = RING_CENTER_Y + radius * Math.sin(rad).toFloat()
-            // Unlit bars are drawn in a fixed light grey so they read as empty slots
-            // instead of half-filled theme-coloured dots.
-            if (i < level) fill(color) else fill(DOT_EMPTY_COLOR)
+            // Unlit bars are drawn in a faint tint so they read as empty slots on both
+            // light and dark status bars.
+            if (i < level) fill(color) else fill(color, DOT_EMPTY_ALPHA)
             canvas.drawCircle(x, y, dotRadius, paint)
         }
     }

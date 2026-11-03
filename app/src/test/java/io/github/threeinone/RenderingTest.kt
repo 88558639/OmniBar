@@ -180,11 +180,39 @@ class RenderingTest {
             val y = ((53f + radius * Math.sin(rad).toFloat()) * 3).toInt()
             return b.getPixel(x, y)
         }
-        // Lit dots use the tint, empty ones the fixed light grey.
+        // Lit dots are solid, empty ones are a faint tint.
         assertTrue("Left half must show the main card's four bars",
-            (0..3).all { pixel(-1, it) == Color.BLACK })
+            (0..3).all { Color.alpha(pixel(-1, it)) == 255 })
         assertTrue("Right half must show only the secondary card's first bar",
-            pixel(1, 0) == Color.BLACK && (1..3).all { pixel(1, it) == 0xFFBDBDBD.toInt() })
+            Color.alpha(pixel(1, 0)) == 255 && (1..3).all { Color.alpha(pixel(1, it)) < 80 })
+    }
+
+    @Test fun aMissingSecondaryCardLeavesTheRightColumnEmpty() {
+        val sims = listOf(IndicatorSim(slot = 0, phase = SimPhase.READY, level = 4, dataDefault = true))
+        val state = IndicatorState.demo.copy(sim = SimPhase.READY, mobileLevel = 4, sims = sims)
+        val b = render(state, IndicatorConfig(dualSim = true))
+        fun alpha(side: Int, index: Int): Int {
+            val radius = 44f
+            val angles = floatArrayOf(-33f, -11f, 11f, 33f)
+            val rad = Math.toRadians(angles[index].toDouble())
+            val x = ((50f + side * radius * Math.cos(rad).toFloat()) * 3).toInt()
+            val y = ((53f + radius * Math.sin(rad).toFloat()) * 3).toInt()
+            return Color.alpha(b.getPixel(x, y))
+        }
+        assertTrue("The main card must keep its bars", (0..3).all { alpha(-1, it) == 255 })
+        assertTrue("A switched-off secondary card must leave the right column empty",
+            (0..3).all { alpha(1, it) < 80 })
+        // With the dual-card view switched off the right column stays empty as well.
+        val b2 = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888)
+        IndicatorRenderer().draw(Canvas(b2), 300f, 300f, state, IndicatorConfig(dualSim = false), Color.BLACK)
+        var empty = true
+        for (index in 0..3) {
+            val rad = Math.toRadians(floatArrayOf(-33f, -11f, 11f, 33f)[index].toDouble())
+            val x = ((50f + 44f * Math.cos(rad).toFloat()) * 3).toInt()
+            val y = ((53f + 44f * Math.sin(rad).toFloat()) * 3).toInt()
+            if (Color.alpha(b2.getPixel(x, y)) >= 80) empty = false
+        }
+        assertTrue("The secondary column must stay empty when dual SIM is off", empty)
     }
 
     @Test fun revisedStatesContactSheet() {

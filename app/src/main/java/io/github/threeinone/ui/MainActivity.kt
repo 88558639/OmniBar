@@ -192,7 +192,7 @@ class MainActivity : Activity() {
         colorRow("普通 / 慢充 · 蓝", "slowChargeColor", 0xFF3B82F6.toInt())
         colorRow("自定义充电色", "chargingColor", 0xFF1CB753.toInt())
         section("蜂窝增强")
-        toggle("双卡信号环", "dualSim", false)
+        toggle("显示副卡信号（右列）", "dualSim", false)
         toggle("显示上下行活动箭头", "showActivity", false)
         section("电量数字")
         slider("电量数字大小", "numberScale", 60, 140, 115, "%")
