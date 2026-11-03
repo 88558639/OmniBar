@@ -190,9 +190,6 @@ class MainActivity : Activity() {
         toggle("双卡信号环", "dualSim", false)
         toggle("显示上下行活动箭头", "showActivity", false)
         section("电量数字")
-        toggle("始终显示电量数字", "showNumber", false)
-        toggle("低于阈值自动显示（含等于）", "autoNumber", false)
-        slider("电量数字显示阈值", "numberThreshold", 1, 100, 20, "%")
         slider("电量数字大小", "numberScale", 75, 250, 115, "%")
         section("适配诊断")
         val diagnosticsRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }

@@ -89,19 +89,29 @@ class BatteryColorTest {
     @Test fun vpnShieldDrawnWhenEnabledAndActive() {
         val on = render(IndicatorState.demo.copy(vpn = true), IndicatorConfig(showVpn = true))
         val off = render(IndicatorState.demo.copy(vpn = true), IndicatorConfig(showVpn = false))
-        val onInk = topRightInk(on)
-        val offInk = topRightInk(off)
-        assertTrue("VPN shield should add ink in the top-right (onInk=$onInk offInk=$offInk)",
+        val onInk = shieldInk(on)
+        val offInk = shieldInk(off)
+        assertTrue("VPN shield should add ink in the top-left (onInk=$onInk offInk=$offInk)",
             onInk > offInk + 50)
     }
 
     @Test fun vpnShieldSkippedWhenDisabled() {
         val off = render(IndicatorState.demo.copy(vpn = true), IndicatorConfig(showVpn = false))
         val base = render(IndicatorState.demo.copy(vpn = false), IndicatorConfig(showVpn = true))
-        val offInk = topRightInk(off)
-        val baseInk = topRightInk(base)
+        val offInk = shieldInk(off)
+        val baseInk = shieldInk(base)
         assertTrue("Shield must not appear when disabled (offInk=$offInk baseInk=$baseInk)",
             offInk <= baseInk + 5)
+        assertEquals("No shield ink expected", 0, offInk)
+    }
+
+    @Test fun vpnShieldMovesToTheTopRightWhenSwapped() {
+        val swapped = render(IndicatorState.demo.copy(vpn = true),
+            IndicatorConfig(showVpn = true, swap = true))
+        val plain = render(IndicatorState.demo.copy(vpn = true), IndicatorConfig(showVpn = true))
+        assertTrue("Swapped shield should be in the top-right",
+            swappedInk(swapped) > swappedInk(plain) + 50)
+        assertEquals("Swapped shield must leave the top-left empty", 0, shieldInk(swapped))
     }
 
     private fun render(state: IndicatorState, config: IndicatorConfig): Bitmap {
@@ -110,11 +120,19 @@ class BatteryColorTest {
         return b
     }
 
-    // Count ink pixels in the top-right corner (x in [200,300), y in [0,110)) — the VPN shield
-    // lives there; the battery ring's nearest arc sits left of x=235, so this isolates the shield.
-    private fun topRightInk(b: Bitmap): Int {
+    // The VPN shield lives in the top-left corner (x 12..22, y 4..16 units → 36..66 / 12..48 px).
+    private fun shieldInk(b: Bitmap): Int {
         var c = 0
-        for (y in 0 until 110) for (x in 200 until 300) {
+        for (y in 0 until 55) for (x in 28..72) {
+            if (Color.alpha(b.getPixel(x, y)) > 0) c++
+        }
+        return c
+    }
+
+    // With swap the shield moves to the top-right corner (x 78..88 units → 234..264 px).
+    private fun swappedInk(b: Bitmap): Int {
+        var c = 0
+        for (y in 0 until 55) for (x in 228..270) {
             if (Color.alpha(b.getPixel(x, y)) > 0) c++
         }
         return c

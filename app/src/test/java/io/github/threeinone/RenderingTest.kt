@@ -19,6 +19,9 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
+import kotlin.math.cos
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "zh-rCN-w393dp-h852dp-xxhdpi")
@@ -46,75 +49,107 @@ class RenderingTest {
             }
         }
         save(sheet, "states.png")
+        // The indicator is drawn on a 100x100 unit canvas; 1 unit = 3 px here.
+        val extreme = IndicatorConfig(stroke = 160, wifiScale = 150,
+            dotScale = 140, dotSpacing = 125, textScale = 170)
         for ((_, state) in states) {
-            val b = Bitmap.createBitmap(80, 80, Bitmap.Config.ARGB_8888)
-            renderer.draw(Canvas(b), 80f, 80f, state, IndicatorConfig(stroke = 160, wifiScale = 150,
-                dotScale = 140, dotSpacing = 125, textScale = 170), Color.BLACK)
-            val pixels = IntArray(80 * 80); b.getPixels(pixels, 0, 80, 0, 0, 80, 80)
+            val small = Bitmap.createBitmap(80, 80, Bitmap.Config.ARGB_8888)
+            renderer.draw(Canvas(small), 80f, 80f, state, extreme, Color.BLACK)
+            val pixels = IntArray(80 * 80); small.getPixels(pixels, 0, 80, 0, 0, 80, 80)
             assertTrue("Blank state: $state", pixels.count { Color.alpha(it) > 0 } > 100)
-            for (x in 0 until 80) {
-                assertEquals("Left overflow", 0, Color.alpha(b.getPixel(0, x)))
-                assertEquals("Right overflow", 0, Color.alpha(b.getPixel(79, x)))
+
+            // The signal-dot ring is clamped to 49.5 units, so the outermost
+            // pixel columns stay empty even with the most extreme settings.
+            val big = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888)
+            renderer.draw(Canvas(big), 300f, 300f, state, extreme, Color.BLACK)
+            for (y in 0 until 300) {
+                assertEquals("Left overflow", 0, Color.alpha(big.getPixel(0, y)))
+                assertEquals("Right overflow", 0, Color.alpha(big.getPixel(299, y)))
             }
+            // Nothing may leave the 100-unit box sideways, and the number's
+            // ascender as well as the battery arc may only graze the top and
+            // the bottom edge by at most one unit.
+            val spill = spillOutsideBox(state, extreme)
+            assertTrue("Horizontal spill: $spill", spill[0] <= 0 && spill[2] <= 0)
+            assertTrue("Vertical spill: $spill", spill[1] <= 3 && spill[3] <= 3)
         }
     }
 
-    @Test fun chargingArcRemainsContinuousAtTop() {
-        val bitmap = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888)
-        IndicatorRenderer().draw(Canvas(bitmap), 300f, 300f,
-            IndicatorState.demo.copy(battery = 100, batteryPhase = BatteryPhase.CHARGING), IndicatorConfig(), Color.BLACK)
-        // Top-center path is never erased for the lightning symbol.
-        for (x in 135..165) assertTrue(Color.alpha(bitmap.getPixel(x, 28)) > 0)
+    @Test fun batteryArcIsContinuousAcrossTheBottomWhenFull() {
+        val full = render(IndicatorState.demo.copy(battery = 100), IndicatorConfig(colors = false))
+        // The arc spans 135° (lower left) to 45° (lower right) around the ring centre (50, 53).
+        for (deg in 135 downTo 45 step 5) {
+            val (x, y) = arcPoint(deg)
+            assertEquals("Gap in the battery arc at $deg°", 255, Color.alpha(full.getPixel(x, y)))
+        }
+        // Half a battery only fills the left half of that sweep, the rest is the faint track.
+        val half = render(IndicatorState.demo.copy(battery = 50), IndicatorConfig(colors = false))
+        val (leftX, leftY) = arcPoint(135)
+        val (midX, midY) = arcPoint(90)
+        val (rightX, rightY) = arcPoint(45)
+        assertEquals(255, Color.alpha(half.getPixel(leftX, leftY)))
+        assertEquals(255, Color.alpha(half.getPixel(midX, midY)))
+        assertEquals(46, Color.alpha(half.getPixel(rightX, rightY)))
     }
 
-    @Test fun chargingHaloFadesArcWithoutErasingBackgroundOrAddingProgress() {
-        val normal = render(IndicatorState.demo.copy(battery = 100))
-        val charging = render(IndicatorState.demo.copy(battery = 100, batteryPhase = BatteryPhase.CHARGING))
-        val original = Color.alpha(normal.getPixel(126, 30))
-        val faded = Color.alpha(charging.getPixel(126, 30))
-        assertTrue("Arc next to bolt must remain faint but visible", faded in 1 until original / 2)
-        val emptyNormal = render(IndicatorState.demo.copy(battery = 0))
-        val emptyCharging = render(IndicatorState.demo.copy(battery = 0, batteryPhase = BatteryPhase.CHARGING))
-        assertTrue(Color.alpha(emptyCharging.getPixel(126, 30)) < Color.alpha(emptyNormal.getPixel(126, 30)))
-        for (background in listOf(Color.WHITE, Color.rgb(21, 25, 27))) {
-            val composed = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888)
-            val c = Canvas(composed)
-            c.drawColor(background)
-            IndicatorRenderer().draw(c, 300f, 300f,
-                IndicatorState.demo.copy(batteryPhase = BatteryPhase.CHARGING), IndicatorConfig(), Color.BLACK)
-            assertEquals("Halo must not erase the host background", 255, Color.alpha(composed.getPixel(126, 30)))
-            assertEquals(background, composed.getPixel(90, 3))
+    @Test fun chargingBoltAppearsOnlyWhileChargingOrFull() {
+        fun boltInk(state: IndicatorState): Int {
+            val b = render(state)
+            return (0 until 36).sumOf { y -> (250..285).count { x -> Color.alpha(b.getPixel(x, y)) > 0 } }
         }
+        assertEquals("No bolt while discharging", 0, boltInk(IndicatorState.demo))
+        assertTrue("Bolt missing while charging",
+            boltInk(IndicatorState.demo.copy(batteryPhase = BatteryPhase.CHARGING)) > 50)
+        assertTrue("Bolt missing when full",
+            boltInk(IndicatorState.demo.copy(battery = 100, batteryPhase = BatteryPhase.FULL)) > 50)
+
+        // The bolt uses the charging colour and never erases the host background.
+        val composed = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888)
+        val c = Canvas(composed)
+        c.drawColor(Color.rgb(21, 25, 27))
+        IndicatorRenderer().draw(c, 300f, 300f,
+            IndicatorState.demo.copy(batteryPhase = BatteryPhase.CHARGING), IndicatorConfig(), Color.BLACK)
+        assertEquals("Background must not be erased", Color.rgb(21, 25, 27), composed.getPixel(15, 15))
+        assertEquals(0xff1cb753.toInt(), composed.getPixel(267, 10))
     }
 
     @Test fun wifiHasFourSeparatelyLitLevels() {
-        val yPositions = listOf(65, 53, 44, 35)
+        // The fan sits at (50, 56): a centre dot plus three arcs whose apexes are
+        // at y = 46 (r = 10), y = 37 (r = 19) and y = 28 (r = 28).
+        val probes = listOf(168 to 56, 138 to 46, 111 to 37, 84 to 28)
         for (level in 0..4) {
             val b = render(IndicatorState.demo.copy(wifiLevel = level), IndicatorConfig(wifiScale = 115))
-            yPositions.forEachIndexed { i, y ->
-                val alpha = Color.alpha(b.getPixel(150, y * 3))
-                if (i < level) assertEquals("Active Wi-Fi band $i at level $level", 255, alpha)
-                else assertEquals("Inactive Wi-Fi band $i at level $level", 55, alpha)
+            probes.forEachIndexed { i, (y, unit) ->
+                val alpha = Color.alpha(b.getPixel(150, y))
+                if (i < level) assertEquals("Active Wi-Fi band $i (y=$unit) at level $level", 255, alpha)
+                else assertEquals("Inactive Wi-Fi band $i (y=$unit) at level $level", 55, alpha)
             }
         }
     }
 
-    @Test fun dataOffUsesArrowsIndependentOfNetworkGeneration() {
-        val state = IndicatorState.demo.copy(wifi = WifiPhase.OFF, dataEnabled = false)
-        val four = render(state.copy(networkType = "4G"))
-        val five = render(state.copy(networkType = "5G"))
-        assertTrue("Data-off symbol must not contain 4G/5G text", four.sameAs(five))
-        assertTrue(Color.alpha(four.getPixel(44 * 3, 55 * 3)) > 200)
-        assertTrue(Color.alpha(four.getPixel(56 * 3, 39 * 3)) > 200)
-        assertTrue(Color.alpha(four.getPixel(50 * 3, 47 * 3)) > 200)
+    @Test fun networkTypeTextIsShownOnlyWhenSimIsReady() {
+        val ready4g = render(IndicatorState.demo.copy(wifi = WifiPhase.OFF, networkType = "4G"))
+        val ready5g = render(IndicatorState.demo.copy(wifi = WifiPhase.OFF, networkType = "5G"))
+        assertFalse("The network type must be rendered when the SIM is ready", ready4g.sameAs(ready5g))
+        assertTrue("No network type glyphs", ink(ready4g, 110, 190, 160, 190) > 200)
+
+        val noSim4g = render(IndicatorState.demo.copy(wifi = WifiPhase.OFF,
+            sim = SimPhase.NO_SIGNAL, networkType = "4G"))
+        val noSim5g = render(IndicatorState.demo.copy(wifi = WifiPhase.OFF,
+            sim = SimPhase.NO_SIGNAL, networkType = "5G"))
+        assertTrue("No network type without a ready SIM", noSim4g.sameAs(noSim5g))
+        assertEquals("Only the placeholder may remain", 0, ink(noSim4g, 110, 190, 160, 190))
+        // The fallback is the small "--" placeholder in the middle of the fan.
+        assertTrue("Placeholder missing", ink(noSim4g, 110, 190, 150, 160) > 0)
     }
 
-    @Test fun networkLabelsAreOpticallyCenteredAboveSignalDots() {
+    @Test fun networkLabelIsCentredOnTheFanPosition() {
         for (label in listOf("2G", "3G", "4G", "5G")) {
             val b = render(IndicatorState.demo.copy(wifi = WifiPhase.OFF, networkType = label))
             val rows = (90..195).filter { y -> (90..210).any { x -> Color.alpha(b.getPixel(x, y)) > 128 } }
             assertTrue(rows.isNotEmpty())
-            assertEquals(46f, (rows.first() + rows.last()) / 6f, 1f)
+            // The label is centred on y = 57 units.
+            assertEquals(57f, (rows.first() + rows.last()) / 6f, 1f)
         }
     }
 
@@ -149,6 +184,39 @@ class RenderingTest {
         val bitmap = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888)
         IndicatorRenderer().draw(Canvas(bitmap), 300f, 300f, state, config, Color.BLACK)
         return bitmap
+    }
+
+    /** Pixel of the battery arc (ring centre (50, 53), radius 44) at the given angle. */
+    private fun arcPoint(deg: Int): Pair<Int, Int> {
+        val rad = Math.toRadians(deg.toDouble())
+        return ((50 + 44 * cos(rad)).roundToInt() * 3) to ((53 + 44 * sin(rad)).roundToInt() * 3)
+    }
+
+    private fun ink(b: Bitmap, x0: Int, x1: Int, y0: Int, y1: Int): Int {
+        var n = 0
+        for (y in y0..y1) for (x in x0..x1) if (Color.alpha(b.getPixel(x, y)) > 0) n++
+        return n
+    }
+
+    /**
+     * Draws the indicator into a padded canvas and measures how far the ink
+     * leaves the 100-unit box: [left, top, right, bottom] in pixels.
+     */
+    private fun spillOutsideBox(state: IndicatorState, config: IndicatorConfig,
+        box: Int = 300, pad: Int = 60): IntArray {
+        val b = Bitmap.createBitmap(box + pad * 2, box + pad * 2, Bitmap.Config.ARGB_8888)
+        val c = Canvas(b)
+        c.translate(pad.toFloat(), pad.toFloat())
+        IndicatorRenderer().draw(c, box.toFloat(), box.toFloat(), state, config, Color.BLACK)
+        var minX = Int.MAX_VALUE; var maxX = -1; var minY = Int.MAX_VALUE; var maxY = -1
+        for (y in 0 until b.height) for (x in 0 until b.width)
+            if (Color.alpha(b.getPixel(x, y)) > 0) {
+                if (x < minX) minX = x
+                if (x > maxX) maxX = x
+                if (y < minY) minY = y
+                if (y > maxY) maxY = y
+            }
+        return intArrayOf(pad - minX, pad - minY, maxX - (pad + box - 1), maxY - (pad + box - 1))
     }
 
     @Test fun configRangesClampCorruptOrOldPreferences() {
@@ -191,8 +259,8 @@ class RenderingTest {
                 View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
             root.layout(0, 0, width, height)
             val views = descendants(root)
-            assertEquals(12, views.count { it is SeekBar })
-            assertEquals(9, views.count { it is Switch })
+            assertEquals(11, views.count { it is SeekBar })
+            assertEquals(7, views.count { it is Switch })
             val spinner = views.filterIsInstance<Spinner>().single()
             spinner.setSelection(1)
             org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()

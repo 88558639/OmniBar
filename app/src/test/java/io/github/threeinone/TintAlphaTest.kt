@@ -20,31 +20,35 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class TintAlphaTest {
     @Test fun systemTintAlphaIsPreservedAcrossArcWifiTextAndSignalDots() {
-        // Use an empty battery arc so the sampled top pixel is not the
-        // composition of the background and progress arcs.
+        // Use an empty battery arc so the sampled arc pixel is only the faint
+        // track (alpha 46) and not the composition of track and progress arc.
         val arcState = IndicatorState.demo.copy(battery = 0)
         val arcConfig = IndicatorConfig(colors = false)
-        val opaqueArc = render(Color.WHITE, arcState, arcConfig)
-        val translucentArc = render(Color.argb(128, 255, 255, 255), arcState, arcConfig)
-        assertAlphaNear(opaqueArc, translucentArc, 150, 30)
+        val opaqueArc = render(arcState, arcConfig, Color.WHITE)
+        val translucentArc = render(arcState, arcConfig, Color.argb(128, 255, 255, 255))
+        // The battery arc runs across the bottom of the ring, centred on (50, 97).
+        assertAlphaNear(opaqueArc, translucentArc, 150, 291)
 
-        val wifiOpaque = render(Color.WHITE)
-        val wifiTranslucent = render(Color.argb(128, 255, 255, 255))
-        assertAlphaNear(wifiOpaque, wifiTranslucent, 150, 195)
+        val wifiOpaque = render(IndicatorState.demo, IndicatorConfig(), Color.WHITE)
+        val wifiTranslucent = render(IndicatorState.demo, IndicatorConfig(), Color.argb(128, 255, 255, 255))
+        // The Wi-Fi fan's centre dot sits at (50, 56).
+        assertAlphaNear(wifiOpaque, wifiTranslucent, 150, 168)
 
-        val signalOpaque = render(Color.WHITE)
-        val signalTranslucent = render(Color.argb(128, 255, 255, 255))
-        assertAlphaNear(signalOpaque, signalTranslucent, 130, 264)
+        val signalOpaque = render(IndicatorState.demo, IndicatorConfig(), Color.WHITE)
+        val signalTranslucent = render(IndicatorState.demo, IndicatorConfig(), Color.argb(128, 255, 255, 255))
+        // A lit signal dot of the outer ring, at radius 44 and angle -11°.
+        assertAlphaNear(signalOpaque, signalTranslucent, 280, 134)
 
         val textState = IndicatorState.demo.copy(wifi = WifiPhase.OFF)
-        val textOpaque = render(Color.WHITE, textState)
-        val textTranslucent = render(Color.argb(128, 255, 255, 255), textState)
-        assertRegionAlphaNear(textOpaque, textTranslucent, 120, 120, 180, 165)
+        val textOpaque = render(textState, IndicatorConfig(), Color.WHITE)
+        val textTranslucent = render(textState, IndicatorConfig(), Color.argb(128, 255, 255, 255))
+        // The network type text is drawn centred on (50, 57).
+        assertRegionAlphaNear(textOpaque, textTranslucent, 110, 145, 190, 200)
     }
 
     @Test fun opaqueBlackTintDoesNotChangeWhenAlphaIsApplied() {
-        val opaque = render(Color.BLACK)
-        val explicit = render(Color.argb(255, 0, 0, 0))
+        val opaque = render(IndicatorState.demo, IndicatorConfig(), Color.BLACK)
+        val explicit = render(IndicatorState.demo, IndicatorConfig(), Color.argb(255, 0, 0, 0))
         for (y in 0 until opaque.height) {
             for (x in 0 until opaque.width) {
                 assertEquals("Pixel changed at ($x,$y)", opaque.getPixel(x, y), explicit.getPixel(x, y))
@@ -59,7 +63,8 @@ class TintAlphaTest {
         IndicatorRenderer().draw(Canvas(bitmap), 300f, 300f, state, config,
             Color.argb(128, 255, 255, 255))
 
-        val inactiveBand = Color.alpha(bitmap.getPixel(150, 195))
+        // The unlit outermost Wi-Fi band starts at angle 225°, i.e. at (30, 36) units.
+        val inactiveBand = Color.alpha(bitmap.getPixel(91, 109))
         assertTrue("Inactive Wi-Fi band must include tint alpha", inactiveBand in 20..35)
     }
 
@@ -70,13 +75,15 @@ class TintAlphaTest {
         IndicatorRenderer().draw(Canvas(bitmap), 300f, 300f, state, config,
             Color.argb(128, 255, 255, 255))
 
-        assertEquals(255, Color.alpha(bitmap.getPixel(153, 18)))
+        // The charging bolt in the top-right corner keeps the custom charging colour.
+        assertEquals(0xff1cb753.toInt(), bitmap.getPixel(267, 10))
     }
 
-    private fun render(tint: Int, state: IndicatorState = IndicatorState.demo,
-        config: IndicatorConfig = IndicatorConfig()): Bitmap = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888).also {
-        IndicatorRenderer().draw(Canvas(it), 300f, 300f, state, config, tint)
-    }
+    private fun render(state: IndicatorState = IndicatorState.demo,
+        config: IndicatorConfig = IndicatorConfig(), tint: Int = Color.BLACK): Bitmap =
+        Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888).also {
+            IndicatorRenderer().draw(Canvas(it), 300f, 300f, state, config, tint)
+        }
 
     private fun assertAlphaNear(first: Bitmap, second: Bitmap, x: Int, y: Int) {
         val expected = Color.alpha(first.getPixel(x, y))

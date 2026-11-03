@@ -13,6 +13,9 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
+import kotlin.math.cos
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -41,19 +44,39 @@ class VisualRevisionTest {
         }
     }
 
-    @Test fun largeNumbersAndHaloGrowWithoutClipping() {
-        val state = IndicatorState.demo.copy(battery = 100)
-        val small = render(state, IndicatorConfig(showNumber = true, numberScale = 150))
-        val large = render(state, IndicatorConfig(showNumber = true, numberScale = 250))
-        fun glyphInk(b: Bitmap) = (1..78).sumOf { y ->
-            (60..240).count { x -> Color.alpha(b.getPixel(x, y)) == 255 }
+    @Test fun largeNumbersGrowUpToTheSixtyUnitWidthCap() {
+        // The number is drawn on the 100-unit canvas with a 60-unit maximum width.
+        val state = IndicatorState.demo.copy(battery = 76, airplane = true)
+        val small = render(state, IndicatorConfig(numberScale = 100))
+        val large = render(state, IndicatorConfig(numberScale = 250))
+        fun glyphInk(b: Bitmap) = (0..85).sumOf { y ->
+            (0..299).count { x -> Color.alpha(b.getPixel(x, y)) > 0 }
         }
-        assertTrue(glyphInk(large) > glyphInk(small) * 1.5)
-        assertTrue("Larger halo must fade a wider arc",
-            Color.alpha(large.getPixel(72, 57)) < Color.alpha(small.getPixel(72, 57)))
-        for (i in 0 until 300) assertEquals(0, Color.alpha(large.getPixel(i, 0)))
-        for (y in 135 until 300) for (x in 0 until 300)
-            assertEquals(small.getPixel(x, y), large.getPixel(x, y))
+        assertTrue("A larger number scale must not shrink the glyph",
+            glyphInk(large) >= glyphInk(small))
+        // The glyph is clamped by the canvas height, so it must never touch the top row.
+        for (b in listOf(small, large)) {
+            var top = -1
+            for (y in 0..100) {
+                if ((0..299).any { x -> Color.alpha(b.getPixel(x, y)) > 0 }) { top = y; break }
+            }
+            assertTrue("Number is clipped at the top of the canvas", top >= 1)
+        }
+        // The glyph may never grow past the 60-unit (180 px) cap.
+        assertTrue("Number exceeds the maximum width", glyphWidth(large) <= 180)
+        assertTrue("Number exceeds the maximum width", glyphWidth(render(
+            IndicatorState.demo.copy(battery = 100, airplane = true), IndicatorConfig(numberScale = 250))) <= 180)
+        // The baseline sits at y = 28 units, so the glyph never reaches below it.
+        for (b in listOf(small, large)) {
+            var lowest = -1
+            for (y in 0..100) if ((0..299).any { x -> Color.alpha(b.getPixel(x, y)) > 0 }) lowest = y
+            assertTrue("Number reaches below the baseline: $lowest", lowest in 84..86)
+        }
+        // A single digit is centred on x = 50.
+        val single = render(IndicatorState.demo.copy(battery = 5, airplane = true),
+            IndicatorConfig(numberScale = 115))
+        val columns = (0..299).filter { x -> (0..85).any { y -> Color.alpha(single.getPixel(x, y)) > 0 } }
+        assertTrue("Number is not centred", Math.abs((columns.first() + columns.last()) / 2 - 150) <= 3)
     }
 
     @Test fun automaticNumberContactSheet() {
@@ -90,6 +113,26 @@ class VisualRevisionTest {
             IndicatorRenderer().draw(Canvas(it), 300f, 300f, state, config, tint)
         }
 
+    /** Width in pixels of the number drawn in the top band of the canvas. */
+    private fun glyphWidth(b: Bitmap): Int {
+        val columns = (0..299).filter { x -> (0..85).any { y -> Color.alpha(b.getPixel(x, y)) > 0 } }
+        return if (columns.isEmpty()) 0 else columns.last() - columns.first() + 1
+    }
+
+    /** Contiguous groups of columns that carry ink in the given band. */
+    private fun inkClusters(b: Bitmap, x0: Int, x1: Int, y0: Int, y1: Int, threshold: Int = 128): List<IntRange> {
+        val columns = (x0..x1).filter { x -> (y0..y1).any { y -> Color.alpha(b.getPixel(x, y)) > threshold } }
+        if (columns.isEmpty()) return emptyList()
+        val groups = mutableListOf<IntRange>()
+        var start = columns.first(); var previous = columns.first()
+        for (x in columns.drop(1)) {
+            if (x > previous + 1) { groups += start..previous; start = x }
+            previous = x
+        }
+        groups += start..previous
+        return groups
+    }
+
     @Test fun numbersDoNotShrinkOrShiftWifiAndSignalDots() {
         for (phase in listOf(BatteryPhase.NORMAL, BatteryPhase.CHARGING)) {
             val state = IndicatorState.demo.copy(batteryPhase = phase)
@@ -113,18 +156,29 @@ class VisualRevisionTest {
         }
     }
 
-    @Test fun numberHaloFadesOnlyArcAndKeepsTopContinuous() {
-        val state = IndicatorState.demo.copy(battery = 100)
-        val off = render(state, IndicatorConfig())
-        val on = render(state, IndicatorConfig(showNumber = true))
-        // Outside the glyphs but inside their shared halo.
-        assertTrue(Color.alpha(on.getPixel(108, 34)) in 1 until Color.alpha(off.getPixel(108, 34)))
+    @Test fun batteryNumberIsDrawnAtTheTopAndKeepsTheBackgroundIntact() {
+        // On a transparent canvas the top band carries the percentage glyphs only.
+        val transparent = render(IndicatorState.demo, IndicatorConfig(), Color.WHITE)
+        val glyphs = (0..85).sumOf { y ->
+            (0..299).count { x -> Color.alpha(transparent.getPixel(x, y)) > 0 }
+        }
+        assertTrue("Battery number is missing", glyphs > 1000)
+        // "76" is two separate digits, so the label shows two ink clusters.
+        assertEquals(2, inkClusters(transparent, 0, 299, 0, 40).size)
+
+        // On a host background the number is painted in the tint colour and
+        // everything around it keeps the background untouched.
+        val background = Color.rgb(41, 52, 62)
         val b = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888)
         val c = Canvas(b)
-        c.drawColor(Color.rgb(41, 52, 62))
-        IndicatorRenderer().draw(c, 300f, 300f, state, IndicatorConfig(showNumber = true), Color.WHITE)
-        for (x in 105..195) assertEquals(255, Color.alpha(b.getPixel(x, 30)))
-        assertEquals(Color.rgb(41, 52, 62), b.getPixel(90, 3))
+        c.drawColor(background)
+        IndicatorRenderer().draw(c, 300f, 300f, IndicatorState.demo, IndicatorConfig(), Color.WHITE)
+        val white = (0..85).sumOf { y ->
+            (0..299).count { x -> b.getPixel(x, y) == 0xffffffff.toInt() }
+        }
+        assertTrue("Battery number is not painted in the tint colour", white > 1000)
+        assertEquals(background, b.getPixel(15, 15))
+        assertEquals(background, b.getPixel(285, 15))
     }
 
     @Test fun unknownNumberDoesNotInventBatteryProgress() {
@@ -156,12 +210,26 @@ class VisualRevisionTest {
     @Test fun airplaneHasRoundedNoseSweptWingsAndSeparateTailInBothModes() {
         for (wifi in listOf(WifiPhase.OFF, WifiPhase.CONNECTED)) {
             val b = render(IndicatorState.demo.copy(airplane = true, wifi = wifi), IndicatorConfig())
-            assertTrue(Color.alpha(b.getPixel(150, 225)) > 128)
-            assertEquals(0, Color.alpha(b.getPixel(133, 225)))
-            assertTrue(Color.alpha(b.getPixel(120, 270)) > 128)
-            assertTrue(Color.alpha(b.getPixel(180, 270)) > 128)
-            assertTrue(Color.alpha(b.getPixel(150, 282)) > 128)
-            for (x in 0 until 300) assertEquals(0, Color.alpha(b.getPixel(x, 299)))
+            // Rounded nose: the tip starts narrow and widens towards the body.
+            val tip = inkClusters(b, 100, 200, 125, 125).singleOrNull()
+            val body = inkClusters(b, 100, 200, 140, 140).singleOrNull()
+            assertNotNull("Nose is not a single shape", tip)
+            assertNotNull("Body is not a single shape", body)
+            assertTrue("Nose is not rounded: tip=${tip!!.count()} body=${body!!.count()}",
+                tip.count() <= 8 && body.count() > tip.count())
+            // Swept wings: at the wing row the wings and the fuselage are separate.
+            assertEquals(listOf(116..128, 143..156, 171..183), inkClusters(b, 100, 200, 174, 174))
+            // Separate tail: two distinct fins with a gap in the middle.
+            assertEquals(listOf(136..142, 157..163), inkClusters(b, 100, 200, 196, 196))
+            assertEquals(0, Color.alpha(b.getPixel(150, 196)))
+            // The plane ends well above the battery arc and never reaches the
+            // bottom edge of the icon.
+            for (y in 199..241) for (x in 100..200)
+                assertEquals("Airplane reaches into the arc", 0, Color.alpha(b.getPixel(x, y)))
+            for (x in 0 until 300) {
+                val bottom = Color.alpha(b.getPixel(x, 299))
+                if (bottom > 0) assertTrue("Unexpected element at the bottom edge: $x", x in 120..180)
+            }
         }
     }
 
@@ -197,9 +265,13 @@ class VisualRevisionTest {
             }
             val b = render(state, config)
             for (i in 0 until 300) {
-                assertEquals(0, Color.alpha(b.getPixel(0, i)))
-                assertEquals(0, Color.alpha(b.getPixel(299, i)))
-                assertEquals(0, Color.alpha(b.getPixel(i, 299)))
+                assertEquals("Left overflow", 0, Color.alpha(b.getPixel(0, i)))
+                assertEquals("Right overflow", 0, Color.alpha(b.getPixel(299, i)))
+            }
+            // The battery arc is the only element that reaches the bottom edge.
+            for (x in 0 until 300) {
+                if (Color.alpha(b.getPixel(x, 299)) > 0)
+                    assertTrue("Unexpected element at the bottom edge: $x", x in 100..200)
             }
         }
         save(sheet, "visual-0.1.3.png")

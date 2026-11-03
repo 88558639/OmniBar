@@ -17,16 +17,20 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
+import kotlin.math.cos
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ChargingMarkerTest {
-    @Test fun legacyConflictIsNormalizedAndControlsRemainExclusive() {
+    @Test fun legacyConflictIsNormalizedAndTheNumberModeSwitchesAreGone() {
         val prefs = RuntimeEnvironment.getApplication()
             .getSharedPreferences(IndicatorConfig.FILE, 0)
         prefs.edit().clear().putBoolean("showNumber", true).putBoolean("autoNumber", true)
             .putInt("numberThreshold", 30).putInt("numberScale", 250).commit()
+        // The stored conflict is still resolved when the config is read.
         assertFalse(IndicatorConfig.read(prefs).autoNumber)
         val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
         try {
@@ -35,23 +39,14 @@ class ChargingMarkerTest {
                 else emptyList()
             val switches = descendants(controller.get().findViewById(android.R.id.content))
                 .filterIsInstance<Switch>()
-            val always = switches.single { it.text == "始终显示电量数字" }
-            val auto = switches.single { it.text == "低于阈值自动显示（含等于）" }
-            assertTrue(always.isChecked)
-            assertFalse(auto.isChecked)
+            // The percentage is always part of the new layout, so the settings
+            // page no longer offers the "always"/"automatic" number switches.
+            assertFalse(switches.any { it.text.contains("始终显示电量数字") })
+            assertFalse(switches.any { it.text.contains("低于阈值自动显示") })
+            assertEquals(7, switches.size)
             assertFalse(prefs.getBoolean("autoNumber", true))
-            auto.isChecked = true
-            assertFalse(always.isChecked)
-            assertTrue(IndicatorConfig.read(prefs).autoNumber)
-            always.isChecked = true
-            assertFalse(auto.isChecked)
-            assertFalse(IndicatorConfig.read(prefs).autoNumber)
-            always.isChecked = false
-            assertFalse(auto.isChecked)
-            assertFalse(IndicatorConfig.read(prefs).showNumber)
             assertEquals(30, prefs.getInt("numberThreshold", 0))
             assertEquals(250, prefs.getInt("numberScale", 0))
-            assertFalse(IndicatorConfig.normalizeNumberMode(prefs))
         } finally { controller.pause().stop().destroy() }
     }
 
@@ -75,25 +70,55 @@ class ChargingMarkerTest {
             IndicatorRenderer().draw(Canvas(it), 300f, 300f, state, config, Color.BLACK)
         }
 
-    @Test fun fullCheckIsAtTopWithArcOnlyHaloAndUnchangedNetwork() {
-        val state = IndicatorState.demo.copy(battery = 100)
-        val normal = render(state, IndicatorConfig())
-        val full = render(state.copy(batteryPhase = BatteryPhase.FULL), IndicatorConfig(colors = false))
-        assertTrue("Check must occupy the top marker", Color.alpha(full.getPixel(147, 45)) > 200)
-        assertTrue("Halo must soften but not erase the arc",
-            Color.alpha(full.getPixel(114, 33)) in 1 until Color.alpha(normal.getPixel(114, 33)))
-        for (y in 90 until 300) for (x in 60..240)
+    /** Contiguous groups of columns that carry ink in the given band. */
+    private fun inkClusters(b: Bitmap, x0: Int, x1: Int, y0: Int, y1: Int, threshold: Int = 128): List<IntRange> {
+        val columns = (x0..x1).filter { x -> (y0..y1).any { y -> Color.alpha(b.getPixel(x, y)) > threshold } }
+        if (columns.isEmpty()) return emptyList()
+        val groups = mutableListOf<IntRange>()
+        var start = columns.first(); var previous = columns.first()
+        for (x in columns.drop(1)) {
+            if (x > previous + 1) { groups += start..previous; start = x }
+            previous = x
+        }
+        groups += start..previous
+        return groups
+    }
+
+    @Test fun fullChargeShowsTheNumberAtTopAndDrawsTheCompleteArc() {
+        val full = render(IndicatorState.demo.copy(battery = 100, batteryPhase = BatteryPhase.FULL),
+            IndicatorConfig())
+        val normal = render(IndicatorState.demo.copy(battery = 100), IndicatorConfig())
+
+        // The percentage is drawn at the top in the charging colour.
+        val greenAtTop = (0..40).sumOf { y ->
+            (0..299).count { x -> full.getPixel(x, y) == 0xff1cb753.toInt() }
+        }
+        assertTrue("Full charge must paint the number in the charging colour", greenAtTop > 500)
+        // "100" is three separate digits.
+        assertEquals(3, inkClusters(full, 0, 250, 0, 40).size)
+
+        // The bottom arc is complete, from 135° (lower left) to 45° (lower right).
+        for (deg in 135 downTo 45 step 5) {
+            val rad = Math.toRadians(deg.toDouble())
+            val x = ((50 + 44 * cos(rad)).roundToInt() * 3)
+            val y = ((53 + 44 * sin(rad)).roundToInt() * 3)
+            assertEquals("Gap in the full arc at $deg°", 0xff1cb753.toInt(), full.getPixel(x, y))
+        }
+
+        // The network part of the indicator is unaffected by the charging state.
+        for (y in 90..170) for (x in 20..280)
             assertEquals("Network geometry changed", normal.getPixel(x, y), full.getPixel(x, y))
-        for (x in 0 until 300) assertEquals(0, Color.alpha(full.getPixel(x, 0)))
+
+        // The host background is never erased.
         val background = Color.rgb(37, 42, 47)
         val opaque = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(opaque)
         canvas.drawColor(background)
-        IndicatorRenderer().draw(canvas, 300f, 300f, state.copy(batteryPhase = BatteryPhase.FULL),
+        IndicatorRenderer().draw(canvas, 300f, 300f,
+            IndicatorState.demo.copy(battery = 100, batteryPhase = BatteryPhase.FULL),
             IndicatorConfig(), Color.WHITE)
-        for (y in 0 until 90) for (x in 0 until 300)
-            assertEquals(255, Color.alpha(opaque.getPixel(x, y)))
-        assertEquals(background, opaque.getPixel(90, 3))
+        assertEquals(255, Color.alpha(opaque.getPixel(150, 60)))
+        assertEquals(background, opaque.getPixel(15, 15))
     }
 
     @Test fun chargingAndFullExtremeContactSheet() {
