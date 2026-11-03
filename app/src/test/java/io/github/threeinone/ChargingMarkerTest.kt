@@ -106,7 +106,7 @@ class ChargingMarkerTest {
         }
 
         // The network part of the indicator is unaffected by the charging state.
-        for (y in 90..170) for (x in 20..280)
+        for (y in 130..200) for (x in 20..280)
             assertEquals("Network geometry changed", normal.getPixel(x, y), full.getPixel(x, y))
 
         // The host background is never erased.

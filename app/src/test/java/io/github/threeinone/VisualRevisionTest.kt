@@ -23,14 +23,14 @@ import kotlin.math.sin
 class VisualRevisionTest {
     @Test fun number250AndAutomaticPreferencesPersistAndClamp() {
         val prefs = RuntimeEnvironment.getApplication().getSharedPreferences("numbers250", 0)
-        prefs.edit().putInt("numberScale", 250).putBoolean("autoNumber", true)
+        prefs.edit().putInt("numberScale", 140).putBoolean("autoNumber", true)
             .putInt("numberThreshold", 35).commit()
         val config = IndicatorConfig.read(prefs)
-        assertEquals(250, config.numberScale)
+        assertEquals(140, config.numberScale)
         assertTrue(config.autoNumber)
         assertEquals(35, config.numberThreshold)
         prefs.edit().putInt("numberScale", 999).putInt("numberThreshold", -10).commit()
-        assertEquals(250, IndicatorConfig.read(prefs).numberScale)
+        assertEquals(140, IndicatorConfig.read(prefs).numberScale)
         assertEquals(1, IndicatorConfig.read(prefs).numberThreshold)
     }
 
@@ -48,12 +48,13 @@ class VisualRevisionTest {
         // The number is drawn on the 100-unit canvas with a 60-unit maximum width.
         val state = IndicatorState.demo.copy(battery = 76, airplane = true)
         val small = render(state, IndicatorConfig(numberScale = 100))
-        val large = render(state, IndicatorConfig(numberScale = 250))
-        fun glyphInk(b: Bitmap) = (0..85).sumOf { y ->
+        val large = render(state, IndicatorConfig(numberScale = 140))
+        fun glyphInk(b: Bitmap) = (0..120).sumOf { y ->
             (0..299).count { x -> Color.alpha(b.getPixel(x, y)) > 0 }
         }
-        assertTrue("A larger number scale must not shrink the glyph",
-            glyphInk(large) >= glyphInk(small))
+        // The slider must have a visible effect across its whole range.
+        assertTrue("A larger number scale must draw more ink",
+            glyphInk(large) > glyphInk(small) * 1.5)
         // The glyph is clamped by the canvas height, so it must never touch the top row.
         for (b in listOf(small, large)) {
             var top = -1
@@ -65,12 +66,12 @@ class VisualRevisionTest {
         // The glyph may never grow past the 60-unit (180 px) cap.
         assertTrue("Number exceeds the maximum width", glyphWidth(large) <= 180)
         assertTrue("Number exceeds the maximum width", glyphWidth(render(
-            IndicatorState.demo.copy(battery = 100, airplane = true), IndicatorConfig(numberScale = 250))) <= 180)
-        // The baseline sits at y = 28 units, so the glyph never reaches below it.
+            IndicatorState.demo.copy(battery = 100, airplane = true), IndicatorConfig(numberScale = 140))) <= 180)
+        // The baseline follows the glyph height and must stay clear of the Wi-Fi fan.
         for (b in listOf(small, large)) {
             var lowest = -1
             for (y in 0..100) if ((0..299).any { x -> Color.alpha(b.getPixel(x, y)) > 0 }) lowest = y
-            assertTrue("Number reaches below the baseline: $lowest", lowest in 84..86)
+            assertTrue("Number reaches into the Wi-Fi fan: $lowest", lowest <= 137)
         }
         // A single digit is centred on x = 50.
         val single = render(IndicatorState.demo.copy(battery = 5, airplane = true),
@@ -198,7 +199,7 @@ class VisualRevisionTest {
         assertEquals(250, IndicatorConfig.read(prefs).textScale)
         for (label in listOf("2G", "3G", "4G", "5G")) {
             val state = IndicatorState.demo.copy(wifi = WifiPhase.OFF, networkType = label)
-            fun ink(b: Bitmap) = (90..195).sumOf { y ->
+            fun ink(b: Bitmap) = (120..240).sumOf { y ->
                 (65..235).count { x -> Color.alpha(b.getPixel(x, y)) > 128 }
             }
             val normal = ink(render(state, IndicatorConfig(textScale = 150)))

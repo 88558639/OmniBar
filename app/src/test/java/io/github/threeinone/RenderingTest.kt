@@ -113,16 +113,26 @@ class RenderingTest {
         assertEquals(0xff1cb753.toInt(), composed.getPixel(267, 10))
     }
 
-    @Test fun wifiHasFourSeparatelyLitLevels() {
-        // The fan sits at (50, 68): a centre dot plus three arcs whose apexes are
-        // at y = 58 (r = 10), y = 50 (r = 18) and y = 43 (r = 25).
-        val probes = listOf(204 to 68, 174 to 58, 150 to 50, 129 to 43)
+    @Test fun wifiHasThreeSignalSteps() {
+        // The fan sits at (50, 72): a centre dot plus two arcs whose apexes are
+        // at y = 59 (r = 13) and y = 47 (r = 25).
+        val probes = listOf(216 to 72, 177 to 59, 141 to 47)
+        // Three steps: dot only, dot + inner arc, dot + both arcs.
         for (level in 0..4) {
             val b = render(IndicatorState.demo.copy(wifiLevel = level), IndicatorConfig(wifiScale = 115))
+            val litArcs = when (level) {
+                0, 1 -> 0
+                2 -> 1
+                else -> 2
+            }
+            val expected = listOf(
+                if (level >= 1) 255 else 55,
+                if (litArcs >= 1) 255 else 55,
+                if (litArcs >= 2) 255 else 55
+            )
             probes.forEachIndexed { i, (y, unit) ->
-                val alpha = Color.alpha(b.getPixel(150, y))
-                if (i < level) assertEquals("Active Wi-Fi band $i (y=$unit) at level $level", 255, alpha)
-                else assertEquals("Inactive Wi-Fi band $i (y=$unit) at level $level", 55, alpha)
+                assertEquals("Wi-Fi step $i (y=$unit) at level $level", expected[i],
+                    Color.alpha(b.getPixel(150, y)))
             }
         }
     }
@@ -146,7 +156,9 @@ class RenderingTest {
     @Test fun networkLabelIsCentredOnTheFanPosition() {
         for (label in listOf("2G", "3G", "4G", "5G")) {
             val b = render(IndicatorState.demo.copy(wifi = WifiPhase.OFF, networkType = label))
-            val rows = (90..195).filter { y -> (90..210).any { x -> Color.alpha(b.getPixel(x, y)) > 128 } }
+            // Scan only the label's own band: the percentage number above and the signal
+            // dots at the sides must not influence the measurement.
+            val rows = (130..215).filter { y -> (100..200).any { x -> Color.alpha(b.getPixel(x, y)) > 128 } }
             assertTrue(rows.isNotEmpty())
             // The label is centred on y = 57 units.
             assertEquals(57f, (rows.first() + rows.last()) / 6f, 1f)

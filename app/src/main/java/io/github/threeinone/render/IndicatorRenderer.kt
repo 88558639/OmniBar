@@ -28,13 +28,22 @@ class IndicatorRenderer {
         const val SIGNAL_DOT_RADIUS = 5.4f
 
         /** Centre of the Wi-Fi fan, matched to the reference pill. */
-        const val WIFI_CENTER_Y = 68f
+        const val WIFI_CENTER_Y = 72f
 
-        /** Radii of the three Wi-Fi arcs (outermost first). */
-        val WIFI_ARC_RADII = floatArrayOf(25f, 18f, 10f)
+        /** Radii of the Wi-Fi arcs (outermost first); two arcs plus the dot make three steps. */
+        val WIFI_ARC_RADII = floatArrayOf(25f, 13f)
 
         /** Baseline of the battery percentage number. */
         const val NUMBER_BASELINE = 28f
+
+        /** The number may grow at most this tall (its top stays ~1.5 units below the edge). */
+        const val NUMBER_MAX_ASCENT = 43.5f
+
+        /** …and may not reach into the Wi-Fi fan (whose apex is at y = 47). */
+        const val NUMBER_MAX_BASELINE = 45f
+
+        /** Widest the number may get before it would touch the signal dots. */
+        const val NUMBER_MAX_WIDTH = 60f
     }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -90,15 +99,27 @@ class IndicatorRenderer {
     private fun drawNumber(canvas: Canvas, state: IndicatorState, config: IndicatorConfig, tint: Int) {
         val value = if (state.battery < 0) "?" else state.battery.coerceIn(0, 100).toString()
         val size = 34f * config.numberScale / 100f
-        prepareText(value, size, config.batteryColor(state, tint), 60f)
-        // The width cap alone is not enough: a tall glyph would be cut off at the top of
-        // the canvas, so clamp the size by the real ascent as well.
-        val ascent = -paint.fontMetrics.ascent
-        if (ascent > 0f) {
-            val headroom = NUMBER_BASELINE - 0.5f
-            if (ascent > headroom) paint.textSize *= headroom / ascent
+        prepareText(value, size, config.batteryColor(state, tint), 1000f)
+        // The glyph hangs from the top edge and grows downwards: the baseline follows the
+        // real ascent, so every step of the size slider is visible instead of saturating.
+        var ascent = -paint.fontMetrics.ascent
+        if (ascent > NUMBER_MAX_ASCENT) {
+            paint.textSize *= NUMBER_MAX_ASCENT / ascent
+            ascent = -paint.fontMetrics.ascent
         }
-        canvas.drawText(value, 50f, NUMBER_BASELINE, paint)
+        val baseline = (ascent + 1.5f).coerceAtMost(NUMBER_MAX_BASELINE)
+        // A three-digit reading is too wide for the gap between the signal dots: squeeze it
+        // horizontally instead of shrinking it, so the height still follows the slider.
+        val width = paint.measureText(value)
+        if (width > NUMBER_MAX_WIDTH) {
+            val save = canvas.save()
+            canvas.translate(50f, 0f)
+            canvas.scale(NUMBER_MAX_WIDTH / width, 1f)
+            canvas.drawText(value, 0f, baseline, paint)
+            canvas.restoreToCount(save)
+        } else {
+            canvas.drawText(value, 50f, baseline, paint)
+        }
     }
 
     // ------------------------------------------------------------------ signal dots
@@ -208,10 +229,13 @@ class IndicatorRenderer {
         val wSave = canvas.save()
         // Centred inside the dot ring: the fan's mass sits around y = 50..65, not up top.
         canvas.scale(ws, ws, 50f, WIFI_CENTER_Y)
-        for (i in 0..2) {
+        // Three visible steps: the dot is the glyph's base and each extra arc is one more
+        // bar, so the levels are easy to tell apart.
+        val bars = (state.wifiLevel - 1).coerceIn(0, WIFI_ARC_RADII.size)
+        for (i in WIFI_ARC_RADII.indices) {
             val radius = WIFI_ARC_RADII[i]
             bounds.set(50 - radius, WIFI_CENTER_Y - radius, 50 + radius, WIFI_CENTER_Y + radius)
-            val active = state.wifi != WifiPhase.CONNECTING && state.wifiLevel >= 4 - i
+            val active = state.wifi != WifiPhase.CONNECTING && bars > (WIFI_ARC_RADII.size - 1 - i)
             stroke(tint, 5.5f * config.stroke / 100f * .72f, if (active) 255 else 55)
             canvas.drawArc(bounds, 210f, 120f, false, paint)
         }
