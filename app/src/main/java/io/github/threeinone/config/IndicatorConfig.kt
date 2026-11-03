@@ -2,6 +2,7 @@ package io.github.threeinone.config
 
 import android.content.SharedPreferences
 import io.github.threeinone.model.BatteryPhase
+import io.github.threeinone.model.ChargeProtocol
 import io.github.threeinone.model.IndicatorState
 
 data class IndicatorConfig(
@@ -31,7 +32,12 @@ data class IndicatorConfig(
     val showNumber: Boolean = false,
     val numberScale: Int = 115,
     val autoNumber: Boolean = false,
-    val numberThreshold: Int = 20
+    val numberThreshold: Int = 20,
+    // --- charging protocol palette (SuperVOOC / PPS / plain) ---
+    val chargeColorAuto: Boolean = true,
+    val voocColor: Int = 0xFF9C6BFF.toInt(),
+    val ppsColor: Int = 0xFF2ECC71.toInt(),
+    val slowChargeColor: Int = 0xFF3B82F6.toInt()
 ) {
     fun showsNumber(state: IndicatorState): Boolean =
         state.batteryPhase != BatteryPhase.CHARGING && state.batteryPhase != BatteryPhase.FULL && (showNumber ||
@@ -42,12 +48,26 @@ data class IndicatorConfig(
         if (!colors || state.battery < 0) return tint
         val critCut = criticalThreshold.coerceAtMost(lowThreshold)
         return when {
-            state.batteryPhase in setOf(BatteryPhase.CHARGING, BatteryPhase.FULL) -> ensureVisible(chargingColor)
+            state.batteryPhase in setOf(BatteryPhase.CHARGING, BatteryPhase.FULL) ->
+                ensureVisible(chargeColor(state))
             state.battery in 0..critCut -> ensureVisible(criticalColor)
             state.battery in 0..lowThreshold -> ensureVisible(lowColor)
             state.powerSave -> ensureVisible(saverColor)
             else -> tint
         }
+    }
+
+    /**
+     * Colour used while charging. In automatic mode the firmware's charging protocol decides:
+     * SuperVOOC (OnePlus/OPPO proprietary) uses the violet tone, PPS the green one and
+     * anything slower the blue one. When the protocol is unknown the legacy colour is kept.
+     */
+    fun chargeColor(state: IndicatorState): Int = when {
+        !chargeColorAuto -> chargingColor
+        state.chargeProtocol == ChargeProtocol.SUPER_VOOC -> voocColor
+        state.chargeProtocol == ChargeProtocol.PPS -> ppsColor
+        state.chargeProtocol == ChargeProtocol.NONE -> chargingColor
+        else -> slowChargeColor
     }
 
     /** Serialise for the SystemUI process (cross-process settings bridge). */
@@ -78,6 +98,10 @@ data class IndicatorConfig(
         putInt("numberScale", numberScale)
         putBoolean("autoNumber", autoNumber)
         putInt("numberThreshold", numberThreshold)
+        putBoolean("chargeColorAuto", chargeColorAuto)
+        putInt("voocColor", voocColor)
+        putInt("ppsColor", ppsColor)
+        putInt("slowChargeColor", slowChargeColor)
     }
 
     companion object {
@@ -120,7 +144,11 @@ data class IndicatorConfig(
                 showNumber = bool("showNumber", false),
                 numberScale = int("numberScale", 115).coerceIn(75, 250),
                 autoNumber = bool("autoNumber", false),
-                numberThreshold = int("numberThreshold", 20).coerceIn(1, 100)
+                numberThreshold = int("numberThreshold", 20).coerceIn(1, 100),
+                chargeColorAuto = bool("chargeColorAuto", true),
+                voocColor = int("voocColor", 0xFF9C6BFF.toInt()),
+                ppsColor = int("ppsColor", 0xFF2ECC71.toInt()),
+                slowChargeColor = int("slowChargeColor", 0xFF3B82F6.toInt())
             )
         }
 
@@ -162,7 +190,11 @@ data class IndicatorConfig(
             showNumber = p.getBoolean("showNumber", false),
             numberScale = p.getInt("numberScale", 115).coerceIn(75, 250),
             autoNumber = !p.getBoolean("showNumber", false) && p.getBoolean("autoNumber", false),
-            numberThreshold = p.getInt("numberThreshold", 20).coerceIn(1, 100)
+            numberThreshold = p.getInt("numberThreshold", 20).coerceIn(1, 100),
+            chargeColorAuto = p.getBoolean("chargeColorAuto", true),
+            voocColor = p.getInt("voocColor", 0xFF9C6BFF.toInt()) or 0xFF000000.toInt(),
+            ppsColor = p.getInt("ppsColor", 0xFF2ECC71.toInt()) or 0xFF000000.toInt(),
+            slowChargeColor = p.getInt("slowChargeColor", 0xFF3B82F6.toInt()) or 0xFF000000.toInt()
         )
 
         // WCAG-based visibility floor for custom status colours.

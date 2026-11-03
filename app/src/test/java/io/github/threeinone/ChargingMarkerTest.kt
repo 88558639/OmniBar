@@ -43,7 +43,7 @@ class ChargingMarkerTest {
             // page no longer offers the "always"/"automatic" number switches.
             assertFalse(switches.any { it.text.contains("始终显示电量数字") })
             assertFalse(switches.any { it.text.contains("低于阈值自动显示") })
-            assertEquals(7, switches.size)
+            assertEquals(8, switches.size)
             assertFalse(prefs.getBoolean("autoNumber", true))
             assertEquals(30, prefs.getInt("numberThreshold", 0))
             assertEquals(250, prefs.getInt("numberScale", 0))

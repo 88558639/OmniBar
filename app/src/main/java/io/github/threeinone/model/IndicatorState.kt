@@ -5,6 +5,12 @@ enum class WifiPhase { OFF, DISCONNECTED, CONNECTING, CONNECTED, NO_INTERNET, CA
 enum class SimPhase { READY, NO_SIGNAL, EMERGENCY, ABSENT, DISABLED, LOCKED, UNKNOWN }
 
 /**
+ * Detected charging protocol. [NONE] means the firmware did not report enough information
+ * — in that case the legacy charging colour is kept instead of guessing.
+ */
+enum class ChargeProtocol { NONE, SLOW, FAST, PPS, SUPER_VOOC }
+
+/**
  * Data-traffic activity, matching Android's [android.telephony.TelephonyManager] data-activity
  * constants (NONE=0, IN=1, OUT=2, INOUT=3) so reflection values can be mapped directly.
  */
@@ -43,6 +49,10 @@ data class IndicatorState(
     val vpn: Boolean = false,
     val networkReady: Boolean = false,
     val batteryObserved: Boolean = false,
+    /** Charging protocol reported by the firmware (VOOC / PPS / plain fast / slow). */
+    val chargeProtocol: ChargeProtocol = ChargeProtocol.NONE,
+    /** Negotiated charging power in milliwatts, when the firmware reports it. */
+    val chargeWatts: Int = 0,
     // --- SuperIcon port: dual-SIM + traffic activity (default off / unchanged rendering) ---
     val sims: List<IndicatorSim> = emptyList(),
     val wifiActivity: DataActivity = DataActivity.NONE,

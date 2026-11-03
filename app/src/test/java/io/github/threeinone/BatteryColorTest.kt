@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import io.github.threeinone.config.IndicatorConfig
 import io.github.threeinone.model.BatteryPhase
+import io.github.threeinone.model.ChargeProtocol
 import io.github.threeinone.model.IndicatorState
 import io.github.threeinone.render.IndicatorRenderer
 import org.junit.Assert.assertEquals
@@ -46,6 +47,25 @@ class BatteryColorTest {
         val cfg = IndicatorConfig()
         val s = IndicatorState.demo.copy(battery = 5, batteryPhase = BatteryPhase.CHARGING)
         assertEquals(charging, cfg.batteryColor(s, Color.WHITE))
+    }
+
+    @Test fun chargingColourFollowsTheDetectedProtocol() {
+        val cfg = IndicatorConfig(chargeColorAuto = true)
+        val charging = IndicatorState.demo.copy(battery = 50, batteryPhase = BatteryPhase.CHARGING)
+        assertEquals(cfg.voocColor, cfg.batteryColor(
+            charging.copy(chargeProtocol = ChargeProtocol.SUPER_VOOC), Color.WHITE))
+        assertEquals(cfg.ppsColor, cfg.batteryColor(
+            charging.copy(chargeProtocol = ChargeProtocol.PPS), Color.WHITE))
+        assertEquals(cfg.slowChargeColor, cfg.batteryColor(
+            charging.copy(chargeProtocol = ChargeProtocol.SLOW), Color.WHITE))
+        assertEquals(cfg.slowChargeColor, cfg.batteryColor(
+            charging.copy(chargeProtocol = ChargeProtocol.FAST), Color.WHITE))
+        // An unknown protocol must keep the legacy colour instead of guessing.
+        assertEquals(cfg.chargingColor, cfg.batteryColor(charging, Color.WHITE))
+        // Manual mode always wins over the protocol.
+        val manual = cfg.copy(chargeColorAuto = false)
+        assertEquals(manual.chargingColor, manual.batteryColor(
+            charging.copy(chargeProtocol = ChargeProtocol.SUPER_VOOC), Color.WHITE))
     }
 
     @Test fun criticalBandSitsBelowLowBand() {
