@@ -31,8 +31,8 @@ class TintAlphaTest {
 
         val wifiOpaque = render(IndicatorState.demo, IndicatorConfig(), Color.WHITE)
         val wifiTranslucent = render(IndicatorState.demo, IndicatorConfig(), Color.argb(128, 255, 255, 255))
-        // The Wi-Fi fan's centre dot sits at (50, 56).
-        assertAlphaNear(wifiOpaque, wifiTranslucent, 150, 168)
+        // The Wi-Fi fan's centre dot sits at (50, 62).
+        assertAlphaNear(wifiOpaque, wifiTranslucent, 150, 186)
 
         val signalOpaque = render(IndicatorState.demo, IndicatorConfig(), Color.WHITE)
         val signalTranslucent = render(IndicatorState.demo, IndicatorConfig(), Color.argb(128, 255, 255, 255))
@@ -63,8 +63,8 @@ class TintAlphaTest {
         IndicatorRenderer().draw(Canvas(bitmap), 300f, 300f, state, config,
             Color.argb(128, 255, 255, 255))
 
-        // The unlit outermost Wi-Fi band starts at angle 225°, i.e. at (30, 36) units.
-        val inactiveBand = Color.alpha(bitmap.getPixel(91, 109))
+        // The unlit outermost Wi-Fi band starts at angle 210°, i.e. at (28, 49) units.
+        val inactiveBand = Color.alpha(bitmap.getPixel(85, 148))
         assertTrue("Inactive Wi-Fi band must include tint alpha", inactiveBand in 20..35)
     }
 

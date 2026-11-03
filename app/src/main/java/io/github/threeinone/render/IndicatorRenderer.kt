@@ -27,9 +27,11 @@ class IndicatorRenderer {
         /** Signal dot radius. */
         const val SIGNAL_DOT_RADIUS = 5.4f
 
-        /** Secondary (second SIM) ring radius and dot radius. */
-        const val SUB_RING_RADIUS = 33f
-        const val SUB_DOT_RADIUS = 4.1f
+        /** Centre of the Wi-Fi fan, matched to the reference pill. */
+        const val WIFI_CENTER_Y = 62f
+
+        /** Radii of the three Wi-Fi arcs (outermost first). */
+        val WIFI_ARC_RADII = floatArrayOf(25f, 18f, 10f)
 
         /** Baseline of the battery percentage number. */
         const val NUMBER_BASELINE = 28f
@@ -105,6 +107,11 @@ class IndicatorRenderer {
      * Eight dots on a ring — four per side — lit from the top down. With dual SIM the
      * secondary card uses a smaller inner ring so both cards stay distinguishable.
      */
+    /**
+     * Signal dots on a ring — four per side. With dual SIM the **left** half shows the
+     * main card and the **right** half the secondary card; otherwise both halves mirror
+     * the default card. Dots light up from the top down.
+     */
     private fun drawSignalDots(
         canvas: Canvas, state: IndicatorState, config: IndicatorConfig, tint: Int,
         spread: Float, dotRadius: Float, ringRadius: Float
@@ -112,20 +119,35 @@ class IndicatorRenderer {
         if (state.airplane) return
         val angles = floatArrayOf(-33f * spread, -11f * spread, 11f * spread, 33f * spread)
 
-        val primary = state.sims.firstOrNull { it.dataDefault } ?: state.sims.firstOrNull()
-        val primaryLevel = if (state.sim == SimPhase.READY) state.mobileLevel.coerceIn(0, 4) else 0
-        val primaryRoaming = state.roaming || (primary?.roaming == true)
-        drawDotRing(canvas, angles, ringRadius, dotRadius,
-            primaryLevel, if (primaryRoaming) config.roamingColor else tint)
+        val mainSim = state.sims.firstOrNull { it.dataDefault } ?: state.sims.firstOrNull()
+        val secondarySim = state.sims.firstOrNull { !it.dataDefault } ?: state.sims.getOrNull(1)
+        val mainLevel = if (state.sim == SimPhase.READY) state.mobileLevel.coerceIn(0, 4) else 0
+        val mainColor = if (state.roaming || (mainSim?.roaming == true)) config.roamingColor else tint
 
-        if (config.dualSim) {
-            val secondary = state.sims.firstOrNull { !it.dataDefault } ?: state.sims.getOrNull(1)
-            if (secondary != null) {
-                val level = if (secondary.phase == SimPhase.READY) secondary.level.coerceIn(0, 4) else 0
-                val subDot = SUB_DOT_RADIUS * config.dotScale / 100f
-                drawDotRing(canvas, angles, SUB_RING_RADIUS, subDot,
-                    level, if (secondary.roaming) config.roamingColor else tint)
-            }
+        if (config.dualSim && secondarySim != null) {
+            val secondaryLevel = if (secondarySim.phase == SimPhase.READY) {
+                secondarySim.level.coerceIn(0, 4)
+            } else 0
+            val secondaryColor = if (secondarySim.roaming) config.roamingColor else tint
+            drawDotSide(canvas, angles, -1f, ringRadius, dotRadius, mainLevel, mainColor)
+            drawDotSide(canvas, angles, 1f, ringRadius, dotRadius, secondaryLevel, secondaryColor)
+        } else {
+            drawDotSide(canvas, angles, -1f, ringRadius, dotRadius, mainLevel, mainColor)
+            drawDotSide(canvas, angles, 1f, ringRadius, dotRadius, mainLevel, mainColor)
+        }
+    }
+
+    /** One half of the ring; [dir] is -1 for the left side and +1 for the right. */
+    private fun drawDotSide(
+        canvas: Canvas, angles: FloatArray, dir: Float, radius: Float, dotRadius: Float,
+        level: Int, color: Int
+    ) {
+        for (i in angles.indices) {
+            val rad = Math.toRadians(angles[i].toDouble())
+            val x = 50f + dir * radius * Math.cos(rad).toFloat()
+            val y = RING_CENTER_Y + radius * Math.sin(rad).toFloat()
+            fill(color, if (i < level) 255 else 55)
+            canvas.drawCircle(x, y, dotRadius, paint)
         }
     }
 
@@ -184,21 +206,22 @@ class IndicatorRenderer {
     private fun wifiFan(canvas: Canvas, config: IndicatorConfig, tint: Int, state: IndicatorState) {
         val ws = min(config.wifiScale / 115f, 1.16f)
         val wSave = canvas.save()
-        canvas.scale(ws, ws, 50f, 56f)
+        // Centred inside the dot ring: the fan's mass sits around y = 50..65, not up top.
+        canvas.scale(ws, ws, 50f, WIFI_CENTER_Y)
         for (i in 0..2) {
-            val radius = 28f - i * 9f
-            bounds.set(50 - radius, 56 - radius, 50 + radius, 56 + radius)
+            val radius = WIFI_ARC_RADII[i]
+            bounds.set(50 - radius, WIFI_CENTER_Y - radius, 50 + radius, WIFI_CENTER_Y + radius)
             val active = state.wifi != WifiPhase.CONNECTING && state.wifiLevel >= 4 - i
             stroke(tint, 5.5f * config.stroke / 100f * .72f, if (active) 255 else 55)
-            canvas.drawArc(bounds, 225f, 90f, false, paint)
+            canvas.drawArc(bounds, 210f, 120f, false, paint)
         }
         fill(tint, if (state.wifiLevel >= 1 && state.wifi != WifiPhase.CONNECTING) 255 else 55)
-        canvas.drawCircle(50f, 56f, 3.1f, paint)
+        canvas.drawCircle(50f, WIFI_CENTER_Y, 3.4f, paint)
         canvas.restoreToCount(wSave)
         if (state.wifi in setOf(WifiPhase.NO_INTERNET, WifiPhase.CAPTIVE)) {
-            text(canvas, if (state.wifi == WifiPhase.CAPTIVE) "?" else "!", 74f, 56f, 14f, tint)
+            text(canvas, if (state.wifi == WifiPhase.CAPTIVE) "?" else "!", 73f, 60f, 14f, tint)
         } else if (state.wifi == WifiPhase.CONNECTING) {
-            text(canvas, "...", 50f, 60f, 12f, tint)
+            text(canvas, "...", 50f, 66f, 12f, tint)
         }
     }
 
