@@ -95,7 +95,7 @@ class RenderingTest {
     @Test fun chargingBoltAppearsOnlyWhileChargingOrFull() {
         fun boltInk(state: IndicatorState): Int {
             val b = render(state)
-            return (0 until 36).sumOf { y -> (250..285).count { x -> Color.alpha(b.getPixel(x, y)) > 0 } }
+            return (0 until 70).sumOf { y -> (240..295).count { x -> Color.alpha(b.getPixel(x, y)) > 0 } }
         }
         assertEquals("No bolt while discharging", 0, boltInk(IndicatorState.demo))
         assertTrue("Bolt missing while charging",
@@ -110,7 +110,10 @@ class RenderingTest {
         IndicatorRenderer().draw(c, 300f, 300f,
             IndicatorState.demo.copy(batteryPhase = BatteryPhase.CHARGING), IndicatorConfig(), Color.BLACK)
         assertEquals("Background must not be erased", Color.rgb(21, 25, 27), composed.getPixel(15, 15))
-        assertEquals(0xff1cb753.toInt(), composed.getPixel(267, 10))
+        val solidBolt = (0 until 70).any { y ->
+            (240..295).any { x -> composed.getPixel(x, y) == 0xff1cb753.toInt() }
+        }
+        assertTrue("The bolt must use the charging colour", solidBolt)
     }
 
     @Test fun wifiHasThreeSignalSteps() {

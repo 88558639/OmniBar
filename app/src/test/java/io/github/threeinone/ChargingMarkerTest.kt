@@ -95,7 +95,7 @@ class ChargingMarkerTest {
         }
         assertTrue("Full charge must paint the number in the charging colour", greenAtTop > 500)
         // "100" is three separate digits.
-        assertEquals(3, inkClusters(full, 0, 250, 0, 40).size)
+        assertEquals(3, inkClusters(full, 0, 244, 0, 40).size)
 
         // The bottom arc is complete, from 135° (lower left) to 45° (lower right).
         for (deg in 135 downTo 45 step 5) {

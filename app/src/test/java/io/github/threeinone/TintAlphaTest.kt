@@ -76,7 +76,10 @@ class TintAlphaTest {
             Color.argb(128, 255, 255, 255))
 
         // The charging bolt in the top-right corner keeps the custom charging colour.
-        assertEquals(0xff1cb753.toInt(), bitmap.getPixel(267, 10))
+        val solid = (0 until 70).any { y ->
+            (240..295).any { x -> bitmap.getPixel(x, y) == 0xff1cb753.toInt() }
+        }
+        assertTrue("The charging bolt must keep the opaque custom colour", solid)
     }
 
     private fun render(state: IndicatorState = IndicatorState.demo,

@@ -276,6 +276,7 @@ class ColorOsAdapter(private val loader: ClassLoader) {
         c.registerReceiver(object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent?.action == IndicatorConfig.REFRESH) {
+                    XposedBridge.log("3IN1: refresh broadcast received, reloading settings")
                     intent.getStringExtra(IndicatorConfig.PROBE_TOKEN)
                         ?.takeIf { it.isNotBlank() }
                         ?.let { pendingProbeToken = it }

@@ -267,8 +267,9 @@ class IndicatorRenderer {
     private fun drawBolt(canvas: Canvas, color: Int) {
         val save = canvas.save()
         try {
-            canvas.translate(68f, 1f)
-            canvas.scale(.42f, .42f)
+            // Sits in the free top-right corner, next to the percentage number.
+            // The glyph itself is drawn around x = 44..58, so shift it into place.
+            canvas.translate(38f, 1f)
             path.reset()
             path.moveTo(53f, 0f); path.lineTo(44f, 12f); path.lineTo(50f, 12f)
             path.lineTo(47f, 21f); path.lineTo(58f, 8f); path.lineTo(52f, 8f); path.close()
