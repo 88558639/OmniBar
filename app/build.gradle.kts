@@ -10,8 +10,8 @@ android {
         applicationId = "io.github.threeinone"
         minSdk = 34
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.1.8"
+        versionCode = 10
+        versionName = "0.1.9"
     }
     buildTypes {
         create("compat") {
@@ -31,7 +31,6 @@ android {
 }
 
 dependencies {
-    compileOnly("de.robv.android.xposed:api:82")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.16.1")
 }
