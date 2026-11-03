@@ -183,25 +183,29 @@ class IndicatorRenderer {
     }
 
     /**
-     * Dual-SIM signal rings (SuperIcon port). Draws up to two concentric rows of four arc
-     * segments filling the battery ring's bottom gap — outer row = default data SIM, inner
-     * row = secondary SIM. Falls back to the single-SIM four-dot layout when [IndicatorConfig.dualSim]
+     * Dual-SIM signal dots (SuperIcon port). Draws up to two concentric rows of four dots
+     * filling the battery ring's bottom gap — outer row = default data SIM, inner row =
+     * secondary SIM. Falls back to the single-SIM four-dot layout when [IndicatorConfig.dualSim]
      * is off (see call site).
      */
     private fun drawSignalRings(c: Canvas, state: IndicatorState, config: IndicatorConfig, tint: Int) {
         val centerX = 50f; val centerY = 47f
         state.sims.take(2).forEachIndexed { row, sim ->
-            val radius = if (row == 0) 39f else 32f
-            val line = 2.4f * config.stroke / 120f
+            val radius = if (row == 0) 32f else 25f
+            val dotRadius = (if (row == 0) 3.8f else 2.9f) * config.dotScale / 100f
             val count = 4
-            val gap = 18f
-            val step = (148f - gap * (count - 1)) / count
+            // Stay inside the battery ring's bottom gap (30°..150°), otherwise the outer
+            // dots land on the ring stroke itself.
+            val startAngle = 42f
+            val step = 32f
             val color = if (sim.roaming) config.roamingColor else tint
             for (i in 0 until count) {
-                val a = 32f + i * (step + gap)
-                stroke(color, line, if (i < sim.dots) 255 else 55)
-                bounds.set(centerX - radius, centerY - radius, centerX + radius, centerY + radius)
-                c.drawArc(bounds, a, step, false, paint)
+                val a = startAngle + i * step
+                val rad = Math.toRadians(a.toDouble())
+                val x = centerX + radius * Math.cos(rad).toFloat()
+                val y = centerY + radius * Math.sin(rad).toFloat()
+                fill(color, if (i < sim.dots) 255 else 55)
+                c.drawCircle(x, y, dotRadius, paint)
             }
         }
     }

@@ -26,19 +26,16 @@
             </intent-filter>
         </activity>
 
-        <!-- 供 SystemUI 进程读取外观配置；DUMP 权限只有系统应用可持有。 -->
+        <!-- 供 SystemUI 进程读取外观配置；访问者在代码内按 UID 校验（仅 system/root/shell）。 -->
         <provider
             android:name=".config.ConfigProvider"
             android:authorities="io.github.threeinone.config"
-            android:exported="true"
-            android:readPermission="android.permission.DUMP" />
+            android:exported="true" />
 
-        <!-- 供 SystemUI 回执运行状态。 -->
+        <!-- 供 SystemUI 回执运行状态；同样按 UID 校验。 -->
         <provider
             android:name=".config.DiagnosticsProvider"
             android:authorities="io.github.threeinone.diagnostics"
-            android:exported="true"
-            android:readPermission="android.permission.DUMP"
-            android:writePermission="android.permission.DUMP" />
+            android:exported="true" />
     </application>
 </manifest>

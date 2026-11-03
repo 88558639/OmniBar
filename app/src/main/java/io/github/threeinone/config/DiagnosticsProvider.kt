@@ -6,16 +6,27 @@ import android.content.Context
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
+import android.os.Binder
 import android.os.Bundle
+import android.os.Process
 
 /**
  * Receives the running-state report from the SystemUI-side module so the settings screen can
  * show whether the indicator is actually live (rather than silently failing inside SystemUI).
+ * Access is gated on the calling UID, same as [ConfigProvider].
  */
 class DiagnosticsProvider : ContentProvider() {
     override fun onCreate(): Boolean = true
 
+    private fun allowed(): Boolean {
+        val uid = Binder.getCallingUid()
+        return uid == 0 || uid == 1000 || uid == 2000 || uid == Process.myUid()
+    }
+
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
+        if (!allowed()) {
+            throw SecurityException("3IN1 diagnostics are only writable by the system")
+        }
         val ctx = context ?: return null
         val prefs = ctx.getSharedPreferences("diagnostics", Context.MODE_PRIVATE)
         return when (method) {
@@ -43,6 +54,7 @@ class DiagnosticsProvider : ContentProvider() {
         uri: Uri, projection: Array<out String>?, selection: String?,
         selectionArgs: Array<out String>?, sortOrder: String?
     ): Cursor? {
+        if (!allowed()) return null
         val ctx = context ?: return null
         val prefs = ctx.getSharedPreferences("diagnostics", Context.MODE_PRIVATE)
         val cursor = MatrixCursor(arrayOf("status", "time", "revision"))

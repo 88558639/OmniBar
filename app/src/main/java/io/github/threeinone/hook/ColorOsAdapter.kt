@@ -309,18 +309,32 @@ class ColorOsAdapter(private val loader: ClassLoader) {
      */
     private fun loadConfig(): IndicatorConfig {
         val ctx = context
+        var source = "none"
+        var result: IndicatorConfig? = null
         if (ctx != null) {
             val bundle = runCatching {
                 ctx.contentResolver.call(
                     Uri.parse("content://${IndicatorConfig.PACKAGE}.config"), "config", null, null)
             }.getOrNull()
-            if (bundle != null) return IndicatorConfig.fromBundle(bundle)
+            if (bundle != null) {
+                result = IndicatorConfig.fromBundle(bundle)
+                source = "provider"
+            }
         }
-        return runCatching {
-            val prefs = XSharedPreferences(IndicatorConfig.PACKAGE, IndicatorConfig.FILE)
-            prefs.reload()
-            IndicatorConfig.read(prefs)
-        }.getOrElse { IndicatorConfig() }
+        if (result == null) {
+            result = runCatching {
+                val prefs = XSharedPreferences(IndicatorConfig.PACKAGE, IndicatorConfig.FILE)
+                prefs.reload()
+                IndicatorConfig.read(prefs)
+            }.getOrElse { IndicatorConfig() }
+            source = "xsharedprefs"
+        }
+        XposedBridge.log(
+            "3IN1: config[$source] enabled=${result.enabled} dualSim=${result.dualSim} " +
+                "size=${result.size} dotScale=${result.dotScale} swap=${result.swap} " +
+                "showActivity=${result.showActivity} showVpn=${result.showVpn}"
+        )
+        return result
     }
 
     private fun readRevision(): Long = runCatching {
@@ -348,7 +362,8 @@ class ColorOsAdapter(private val loader: ClassLoader) {
                     XposedBridge.log(
                         "3IN1: state battery=${next.battery} observed=${next.batteryObserved} " +
                             "netReady=${next.networkReady} sim=${next.sim} wifi=${next.wifi} " +
-                            "airplane=${next.airplane} level=${next.mobileLevel}"
+                            "airplane=${next.airplane} level=${next.mobileLevel} " +
+                            "dots=${next.dots} sims=${next.sims.size}"
                     )
                 }
                 guarded { refresh(); if (wasReady != state.ready) report() }
