@@ -28,7 +28,7 @@ class IndicatorRenderer {
         const val SIGNAL_DOT_RADIUS = 5.4f
 
         /** Centre of the Wi-Fi fan, matched to the reference pill. */
-        const val WIFI_CENTER_Y = 62f
+        const val WIFI_CENTER_Y = 68f
 
         /** Radii of the three Wi-Fi arcs (outermost first). */
         val WIFI_ARC_RADII = floatArrayOf(25f, 18f, 10f)
@@ -219,9 +219,9 @@ class IndicatorRenderer {
         canvas.drawCircle(50f, WIFI_CENTER_Y, 3.4f, paint)
         canvas.restoreToCount(wSave)
         if (state.wifi in setOf(WifiPhase.NO_INTERNET, WifiPhase.CAPTIVE)) {
-            text(canvas, if (state.wifi == WifiPhase.CAPTIVE) "?" else "!", 73f, 60f, 14f, tint)
+            text(canvas, if (state.wifi == WifiPhase.CAPTIVE) "?" else "!", 73f, 66f, 14f, tint)
         } else if (state.wifi == WifiPhase.CONNECTING) {
-            text(canvas, "...", 50f, 66f, 12f, tint)
+            text(canvas, "...", 50f, 72f, 12f, tint)
         }
     }
 

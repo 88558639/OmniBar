@@ -114,9 +114,9 @@ class RenderingTest {
     }
 
     @Test fun wifiHasFourSeparatelyLitLevels() {
-        // The fan sits at (50, 62): a centre dot plus three arcs whose apexes are
-        // at y = 52 (r = 10), y = 44 (r = 18) and y = 37 (r = 25).
-        val probes = listOf(186 to 62, 156 to 52, 132 to 44, 111 to 37)
+        // The fan sits at (50, 68): a centre dot plus three arcs whose apexes are
+        // at y = 58 (r = 10), y = 50 (r = 18) and y = 43 (r = 25).
+        val probes = listOf(204 to 68, 174 to 58, 150 to 50, 129 to 43)
         for (level in 0..4) {
             val b = render(IndicatorState.demo.copy(wifiLevel = level), IndicatorConfig(wifiScale = 115))
             probes.forEachIndexed { i, (y, unit) ->
