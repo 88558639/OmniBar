@@ -44,6 +44,9 @@ class IndicatorRenderer {
 
         /** Widest the number may get before it would touch the signal dots. */
         const val NUMBER_MAX_WIDTH = 60f
+
+        /** Colour of an unlit signal dot — a light grey that reads as an empty slot. */
+        const val DOT_EMPTY_COLOR = 0xFFBDBDBD.toInt()
     }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -167,7 +170,9 @@ class IndicatorRenderer {
             val rad = Math.toRadians(angles[i].toDouble())
             val x = 50f + dir * radius * Math.cos(rad).toFloat()
             val y = RING_CENTER_Y + radius * Math.sin(rad).toFloat()
-            fill(color, if (i < level) 255 else 55)
+            // Unlit bars are drawn in a fixed light grey so they read as empty slots
+            // instead of half-filled theme-coloured dots.
+            if (i < level) fill(color) else fill(DOT_EMPTY_COLOR)
             canvas.drawCircle(x, y, dotRadius, paint)
         }
     }

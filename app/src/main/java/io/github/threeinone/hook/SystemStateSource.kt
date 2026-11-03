@@ -58,7 +58,7 @@ class SystemStateSource(
     private var wifiCaps: NetworkCapabilities? = null
     private val simStates = LinkedHashMap<Int, IndicatorSim>()
     private val simServices = HashMap<Int, ServiceState>()
-    private val telephonyCallbacks = mutableListOf<Pair<TelephonyManager, TelephonyCallback>>()
+    private val simCallbacks = mutableMapOf<Int, Pair<TelephonyManager, TelephonyCallback>>()
 
     // Charging protocol telemetry: the standard negotiated values plus Oplus' own extras.
     private var negotiatedCurrentMa = 0
@@ -162,6 +162,8 @@ class SystemStateSource(
                     current = current.copy(airplane = isAirplane())
                     schedule()
                 }
+                // The user moved the data card between slots.
+                ACTION_DEFAULT_DATA_SUBSCRIPTION_CHANGED -> schedule()
             }
         }
     }
@@ -219,6 +221,7 @@ class SystemStateSource(
         context.registerReceiver(miscReceiver, IntentFilter().apply {
             addAction(android.os.PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
             addAction(Intent.ACTION_AIRPLANE_MODE_CHANGED)
+            addAction(ACTION_DEFAULT_DATA_SUBSCRIPTION_CHANGED)
         }, Context.RECEIVER_EXPORTED)
         // Oplus' own battery broadcast carries the negotiated charging protocol.
         runCatching {
@@ -253,8 +256,8 @@ class SystemStateSource(
         runCatching { context.unregisterReceiver(miscReceiver) }
         runCatching { context.unregisterReceiver(oplusReceiver) }
         runCatching { connectivity.unregisterNetworkCallback(netCallback) }
-        telephonyCallbacks.forEach { (tm, cb) -> runCatching { tm.unregisterTelephonyCallback(cb) } }
-        telephonyCallbacks.clear()
+        simCallbacks.values.forEach { (tm, cb) -> runCatching { tm.unregisterTelephonyCallback(cb) } }
+        simCallbacks.clear()
         simStates.clear()
         simServices.clear()
     }
@@ -279,75 +282,94 @@ class SystemStateSource(
             schedule()
             return
         }
-        val active = runCatching { subs.activeSubscriptionInfoList }.getOrNull().orEmpty()
-        val defaultSub = SubscriptionManager.getDefaultDataSubscriptionId()
-        for (info in active) {
-            val id = info.subscriptionId
-            val tm = if (SubscriptionManager.isValidSubscriptionId(id)) {
-                runCatching { telephony.createForSubscriptionId(id) }.getOrDefault(telephony)
-            } else telephony
-            simStates[id] = IndicatorSim(
-                slot = info.simSlotIndex,
-                phase = SimPhase.UNKNOWN,
-                dataEnabled = runCatching { tm.isDataEnabled }.getOrDefault(false),
-                dataDefault = id == defaultSub
-            )
-            val callback = object : TelephonyCallback(),
-                TelephonyCallback.SignalStrengthsListener,
-                TelephonyCallback.DisplayInfoListener,
-                TelephonyCallback.DataActivityListener,
-                TelephonyCallback.ServiceStateListener {
-                override fun onSignalStrengthsChanged(s: SignalStrength) {
-                    val level = s.level.coerceIn(0, 4)
-                    updateSim(id) { current ->
-                        // A non-zero level means the radio has a live signal. Some firmwares
-                        // report a stale/out-of-service ServiceState while the bearer is up,
-                        // so the strength is the more reliable indicator here.
-                        val phase = if (level > 0 && current.phase != SimPhase.ABSENT &&
-                            current.phase != SimPhase.LOCKED
-                        ) SimPhase.READY else current.phase
-                        current.copy(level = level, phase = phase)
-                    }
-                    schedule()
-                }
-
-                override fun onDisplayInfoChanged(displayInfo: TelephonyDisplayInfo) {
-                    val label = IndicatorState.networkLabel(
-                        displayInfo.networkType, displayInfo.overrideNetworkType
-                    )
-                    updateSim(id) { it.copy(networkType = label) }
-                    schedule()
-                }
-
-                override fun onDataActivity(direction: Int) {
-                    val act = when (direction) {
-                        TelephonyManager.DATA_ACTIVITY_IN -> DataActivity.IN
-                        TelephonyManager.DATA_ACTIVITY_OUT -> DataActivity.OUT
-                        TelephonyManager.DATA_ACTIVITY_INOUT -> DataActivity.BOTH
-                        else -> DataActivity.NONE
-                    }
-                    updateSim(id) { it.copy(activity = act) }
-                    schedule()
-                }
-
-                override fun onServiceStateChanged(serviceState: ServiceState) {
-                    simServices[id] = serviceState
-                    updateSim(id) { current ->
-                        val phase = when {
-                            serviceState.state == ServiceState.STATE_IN_SERVICE -> SimPhase.READY
-                            // Keep READY while the radio still reports signal strength.
-                            current.level > 0 -> SimPhase.READY
-                            else -> SimPhase.NO_SIGNAL
-                        }
-                        current.copy(phase = phase, roaming = serviceState.roaming)
-                    }
-                    schedule()
-                }
-            }
-            telephonyCallbacks.add(tm to callback)
-            runCatching { tm.registerTelephonyCallback(executor, callback) }
-        }
+        refreshSubscriptions()
         schedule()
+    }
+
+    /**
+     * Pick up SIM cards that appear after we started — on boot the telephony stack
+     * registers the subscriptions a few seconds late, so a single read at start-up
+     * would leave the indicator without any cellular signal.
+     */
+    private fun refreshSubscriptions() {
+        if (!canReadPhone()) return
+        val active = runCatching { subs.activeSubscriptionInfoList }.getOrNull().orEmpty()
+        val present = active.map { it.subscriptionId }.toSet()
+        (simStates.keys - present).forEach { id ->
+            simStates.remove(id)
+            simCallbacks.remove(id)?.let { (tm, cb) ->
+                runCatching { tm.unregisterTelephonyCallback(cb) }
+            }
+        }
+        active.filter { it.subscriptionId !in simStates }.forEach { info ->
+            registerSim(info.subscriptionId, info.simSlotIndex)
+        }
+    }
+
+    private fun registerSim(id: Int, slot: Int) {
+        val tm = if (SubscriptionManager.isValidSubscriptionId(id)) {
+            runCatching { telephony.createForSubscriptionId(id) }.getOrDefault(telephony)
+        } else telephony
+        simStates[id] = IndicatorSim(
+            slot = slot,
+            phase = SimPhase.UNKNOWN,
+            dataEnabled = runCatching { tm.isDataEnabled }.getOrDefault(false)
+        )
+        val callback = object : TelephonyCallback(),
+            TelephonyCallback.SignalStrengthsListener,
+            TelephonyCallback.DisplayInfoListener,
+            TelephonyCallback.DataActivityListener,
+            TelephonyCallback.ServiceStateListener {
+            override fun onSignalStrengthsChanged(s: SignalStrength) {
+                val level = s.level.coerceIn(0, 4)
+                updateSim(id) { current ->
+                    // A non-zero level means the radio has a live signal. Some firmwares
+                    // report a stale/out-of-service ServiceState while the bearer is up,
+                    // so the strength is the more reliable indicator here.
+                    val phase = if (level > 0 && current.phase != SimPhase.ABSENT &&
+                        current.phase != SimPhase.LOCKED
+                    ) SimPhase.READY else current.phase
+                    current.copy(level = level, phase = phase)
+                }
+                schedule()
+            }
+
+            override fun onDisplayInfoChanged(displayInfo: TelephonyDisplayInfo) {
+                val label = IndicatorState.networkLabel(
+                    displayInfo.networkType, displayInfo.overrideNetworkType
+                )
+                updateSim(id) { it.copy(networkType = label) }
+                schedule()
+            }
+
+            override fun onDataActivity(direction: Int) {
+                val act = when (direction) {
+                    TelephonyManager.DATA_ACTIVITY_IN -> DataActivity.IN
+                    TelephonyManager.DATA_ACTIVITY_OUT -> DataActivity.OUT
+                    TelephonyManager.DATA_ACTIVITY_INOUT -> DataActivity.BOTH
+                    else -> DataActivity.NONE
+                }
+                updateSim(id) { it.copy(activity = act) }
+                schedule()
+            }
+
+            override fun onServiceStateChanged(serviceState: ServiceState) {
+                simServices[id] = serviceState
+                updateSim(id) { current ->
+                    val phase = when {
+                        serviceState.state == ServiceState.STATE_IN_SERVICE -> SimPhase.READY
+                        // Keep READY while the radio still reports signal strength.
+                        current.level > 0 -> SimPhase.READY
+                        else -> SimPhase.NO_SIGNAL
+                    }
+                    current.copy(phase = phase, roaming = serviceState.roaming)
+                }
+                schedule()
+            }
+        }
+        simCallbacks[id] = tm to callback
+        runCatching { tm.registerTelephonyCallback(executor, callback) }
+            .onFailure { XposedBridge.log("3IN1: signal listener for sub $id unavailable: $it") }
     }
 
     private fun updateSim(id: Int, transform: (IndicatorSim) -> IndicatorSim) {
@@ -371,6 +393,7 @@ class SystemStateSource(
     }
 
     private fun buildCurrent() {
+        refreshSubscriptions()
         val wifiEnabled = wifi?.isWifiEnabled == true
         val wifiConnected = wifiCaps != null
         val wifiPhase = WifiStatus.phase(wifiEnabled, false, wifiConnected, wifiCaps)
@@ -380,6 +403,13 @@ class SystemStateSource(
         } else 0
 
         val defaultSub = SubscriptionManager.getDefaultDataSubscriptionId()
+        // The user can move the data card between slots; follow it live so the left half
+        // always shows the main card and the right half the secondary one.
+        simStates.keys.toList().forEach { id ->
+            simStates[id]?.let { if (it.dataDefault != (id == defaultSub)) {
+                simStates[id] = it.copy(dataDefault = id == defaultSub)
+            } }
+        }
         val sims = simStates.values.sortedBy { it.slot }
         val primary = simStates[defaultSub] ?: sims.firstOrNull()
         val simPhase = when {
@@ -417,6 +447,10 @@ class SystemStateSource(
 
         /** `android.os.OplusBatteryManager.ACTION_UI_BATTERY_CHANGED`. */
         const val OPLUS_UI_BATTERY_CHANGED = "android.intent.action.UI_BATTERY_CHANGED"
+
+        /** Broadcast sent when the user moves the data card between slots. */
+        const val ACTION_DEFAULT_DATA_SUBSCRIPTION_CHANGED =
+            "android.intent.action.ACTION_DEFAULT_DATA_SUBSCRIPTION_CHANGED"
 
         /**
          * `BatteryManager.EXTRA_MAX_CHARGING_CURRENT` / `EXTRA_MAX_CHARGING_VOLTAGE` are

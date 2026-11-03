@@ -354,7 +354,8 @@ class ColorOsAdapter(private val loader: ClassLoader) {
             source = SystemStateSource(context!!, { next ->
                 val wasReady = state.ready
                 val fingerprint = listOf(next.battery, next.batteryObserved, next.networkReady,
-                    next.sim, next.wifi, next.airplane)
+                    next.sim, next.wifi, next.airplane) +
+                    next.sims.map { "${it.slot}:${it.level}:${it.dataDefault}" }
                 val changed = fingerprint != lastFingerprint
                 state = next
                 if (changed) {
@@ -363,7 +364,10 @@ class ColorOsAdapter(private val loader: ClassLoader) {
                         "3IN1: state battery=${next.battery} observed=${next.batteryObserved} " +
                             "netReady=${next.networkReady} sim=${next.sim} wifi=${next.wifi} " +
                             "airplane=${next.airplane} level=${next.mobileLevel} " +
-                            "dots=${next.dots} sims=${next.sims.size}"
+                            "dots=${next.dots} sims=${next.sims.size} " +
+                            next.sims.joinToString("") {
+                                "[slot${it.slot} lvl=${it.level} default=${it.dataDefault}]"
+                            }
                     )
                 }
                 guarded { refresh(); if (wasReady != state.ready) report() }

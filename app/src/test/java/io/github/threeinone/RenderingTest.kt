@@ -165,6 +165,28 @@ class RenderingTest {
         }
     }
 
+    @Test fun dualSimPutsTheMainCardOnTheLeftAndTheSecondaryOnTheRight() {
+        val sims = listOf(
+            IndicatorSim(slot = 0, phase = SimPhase.READY, level = 4, dataDefault = true),
+            IndicatorSim(slot = 1, phase = SimPhase.READY, level = 1)
+        )
+        val state = IndicatorState.demo.copy(sim = SimPhase.READY, mobileLevel = 4, sims = sims)
+        val b = render(state, IndicatorConfig(dualSim = true))
+        fun pixel(side: Int, index: Int): Int {
+            val radius = 44f
+            val angles = floatArrayOf(-33f, -11f, 11f, 33f)
+            val rad = Math.toRadians(angles[index].toDouble())
+            val x = ((50f + side * radius * Math.cos(rad).toFloat()) * 3).toInt()
+            val y = ((53f + radius * Math.sin(rad).toFloat()) * 3).toInt()
+            return b.getPixel(x, y)
+        }
+        // Lit dots use the tint, empty ones the fixed light grey.
+        assertTrue("Left half must show the main card's four bars",
+            (0..3).all { pixel(-1, it) == Color.BLACK })
+        assertTrue("Right half must show only the secondary card's first bar",
+            pixel(1, 0) == Color.BLACK && (1..3).all { pixel(1, it) == 0xFFBDBDBD.toInt() })
+    }
+
     @Test fun revisedStatesContactSheet() {
         val states = listOf(
             "充电 · 四格 Wi-Fi" to IndicatorState.demo.copy(battery = 56, batteryPhase = BatteryPhase.CHARGING),
