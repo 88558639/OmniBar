@@ -215,6 +215,43 @@ class RenderingTest {
         assertTrue("The secondary column must stay empty when dual SIM is off", empty)
     }
 
+    @Test fun aDisabledCard1MovesTheSignalToTheCard2Column() {
+        // Card 1 is switched off, card 2 is in use: the right column carries the signal.
+        val sims = listOf(IndicatorSim(slot = 1, phase = SimPhase.READY, level = 3, dataDefault = true))
+        val state = IndicatorState.demo.copy(sim = SimPhase.READY, mobileLevel = 3, sims = sims)
+        val b = render(state, IndicatorConfig(dualSim = true))
+        fun alpha(side: Int, index: Int): Int {
+            val radius = 44f
+            val angles = floatArrayOf(-33f, -11f, 11f, 33f)
+            val rad = Math.toRadians(angles[index].toDouble())
+            val x = ((50f + side * radius * Math.cos(rad).toFloat()) * 3).toInt()
+            val y = ((53f + radius * Math.sin(rad).toFloat()) * 3).toInt()
+            return Color.alpha(b.getPixel(x, y))
+        }
+        assertTrue("The card 1 column must stay empty", (0..3).all { alpha(-1, it) < 80 })
+        assertTrue("The card 2 column must show three bars",
+            (0..2).all { alpha(1, it) == 255 } && alpha(1, 3) < 80)
+    }
+
+    @Test fun singleCardViewShowsTheCardInUseInItsOwnColumn() {
+        // Card 1 is off, card 2 is in use and the dual-card view is off: the signal must
+        // still be visible — in the column of card 2's slot.
+        val sims = listOf(IndicatorSim(slot = 1, phase = SimPhase.READY, level = 3, dataDefault = true))
+        val state = IndicatorState.demo.copy(sim = SimPhase.READY, mobileLevel = 3, sims = sims)
+        val b = render(state, IndicatorConfig(dualSim = false))
+        fun alpha(side: Int, index: Int): Int {
+            val radius = 44f
+            val angles = floatArrayOf(-33f, -11f, 11f, 33f)
+            val rad = Math.toRadians(angles[index].toDouble())
+            val x = ((50f + side * radius * Math.cos(rad).toFloat()) * 3).toInt()
+            val y = ((53f + radius * Math.sin(rad).toFloat()) * 3).toInt()
+            return Color.alpha(b.getPixel(x, y))
+        }
+        assertTrue("The card 1 column must stay empty", (0..3).all { alpha(-1, it) < 80 })
+        assertTrue("The card in use must still show its bars",
+            (0..2).all { alpha(1, it) == 255 } && alpha(1, 3) < 80)
+    }
+
     @Test fun revisedStatesContactSheet() {
         val states = listOf(
             "充电 · 四格 Wi-Fi" to IndicatorState.demo.copy(battery = 56, batteryPhase = BatteryPhase.CHARGING),

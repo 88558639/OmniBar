@@ -143,25 +143,30 @@ class IndicatorRenderer {
         if (state.airplane) return
         val angles = floatArrayOf(-33f * spread, -11f * spread, 11f * spread, 33f * spread)
 
-        // Card 1 (the lower SIM slot) is the main card on the left, card 2 on the right —
-        // the same slot ordering SuperIcon uses.
-        val ordered = state.sims.sortedBy { it.slot }
-        val mainSim = ordered.firstOrNull()
-        val secondarySim = ordered.getOrNull(1)
-        val mainLevel = mainSim?.let {
-            if (it.phase == SimPhase.READY) it.level.coerceIn(0, 4) else 0
-        } ?: if (state.sim == SimPhase.READY) state.mobileLevel.coerceIn(0, 4) else 0
-        val mainColor = if (state.roaming || (mainSim?.roaming == true)) config.roamingColor else tint
+        // The columns are bound to the SIM slots, not to whichever card happens to be in
+        // use: card 1 (slot 0) always owns the left half, card 2 (slot 1) the right one.
+        // A card that is switched off simply leaves its column empty.
+        val bySlot = state.sims.associateBy { it.slot }
+        val card1 = bySlot[0]
+        val card2 = bySlot[1]
+        // The card that is currently used for data (falls back to card 1).
+        val activeSlot = state.sims.firstOrNull { it.dataDefault }?.slot
+            ?: card1?.slot ?: card2?.slot
 
-        // The left half always belongs to card 1, the right half to card 2. A card that is
-        // switched off — or the dual-card view being disabled — leaves its column empty
-        // instead of mirroring the other card.
-        drawDotSide(canvas, angles, -1f, ringRadius, dotRadius, mainLevel, mainColor)
-        val secondaryLevel = if (config.dualSim && secondarySim != null) {
-            if (secondarySim.phase == SimPhase.READY) secondarySim.level.coerceIn(0, 4) else 0
-        } else 0
-        val secondaryColor = if (secondarySim?.roaming == true) config.roamingColor else tint
-        drawDotSide(canvas, angles, 1f, ringRadius, dotRadius, secondaryLevel, secondaryColor)
+        fun level(card: IndicatorSim?): Int = when {
+            card == null -> 0
+            card.phase != SimPhase.READY -> 0
+            else -> card.level.coerceIn(0, 4)
+        }
+
+        // Dual-card view: both columns are shown. Single-card view: only the card in use
+        // is shown, and it keeps the column of its own slot.
+        val leftLevel = if (config.dualSim) level(card1) else if (activeSlot == 0) level(card1) else 0
+        val rightLevel = if (config.dualSim) level(card2) else if (activeSlot == 1) level(card2) else 0
+        val leftColor = if (state.roaming || (card1?.roaming == true)) config.roamingColor else tint
+        val rightColor = if (card2?.roaming == true) config.roamingColor else tint
+        drawDotSide(canvas, angles, -1f, ringRadius, dotRadius, leftLevel, leftColor)
+        drawDotSide(canvas, angles, 1f, ringRadius, dotRadius, rightLevel, rightColor)
     }
 
     /** One half of the ring; [dir] is -1 for the left side and +1 for the right. */
