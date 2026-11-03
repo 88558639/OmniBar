@@ -7,6 +7,11 @@ import kotlin.math.min
 
 /** A normalized 100-unit drawing shared by the real status bar and preview. */
 class IndicatorRenderer {
+    private companion object {
+        /** Signal dot radius in the normalised 100-unit canvas; shared by single and dual SIM. */
+        const val SIGNAL_DOT_RADIUS = 4.4f
+    }
+
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bounds = RectF()
     private val path = Path()
@@ -110,7 +115,7 @@ class IndicatorRenderer {
                         val y = if (i == 0 || i == 3) 83f else 88f
                         val color = if (state.roaming) config.roamingColor else tint
                         fill(color, if (i < state.dots) 255 else 55)
-                        canvas.drawCircle(x, y, 4.2f * config.dotScale / 100f, paint)
+                        canvas.drawCircle(x, y, SIGNAL_DOT_RADIUS * config.dotScale / 100f, paint)
                     }
                     if (state.sim == SimPhase.NO_SIGNAL) text(canvas, "×", 50f, 94f, 13f, tint)
                 }
@@ -189,10 +194,13 @@ class IndicatorRenderer {
      * is off (see call site).
      */
     private fun drawSignalRings(c: Canvas, state: IndicatorState, config: IndicatorConfig, tint: Int) {
-        val centerX = 50f; val centerY = 47f
+        val centerX = 50f
+        // The whole group sits lower than the ring centre so the dots fall into the
+        // bottom gap instead of crowding the Wi-Fi fan.
+        val centerY = 52f
         state.sims.take(2).forEachIndexed { row, sim ->
-            val radius = if (row == 0) 32f else 25f
-            val dotRadius = (if (row == 0) 3.8f else 2.9f) * config.dotScale / 100f
+            val radius = if (row == 0) 33.5f else 23.5f
+            val dotRadius = SIGNAL_DOT_RADIUS * config.dotScale / 100f
             val count = 4
             // Stay inside the battery ring's bottom gap (30°..150°), otherwise the outer
             // dots land on the ring stroke itself.
