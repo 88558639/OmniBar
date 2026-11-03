@@ -1,4 +1,4 @@
-package io.github.threeinone.overlay
+package io.github.threeinone.hook
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -20,6 +20,7 @@ import android.telephony.SubscriptionManager
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyDisplayInfo
 import android.telephony.TelephonyManager
+import de.robv.android.xposed.XposedBridge
 import io.github.threeinone.model.BatterySnapshot
 import io.github.threeinone.model.DataActivity
 import io.github.threeinone.model.IndicatorSim
@@ -29,21 +30,17 @@ import io.github.threeinone.model.WifiStatus
 import java.util.concurrent.Executors
 
 /**
- * Collects the full indicator state from public Android APIs only — no SystemUI hooks,
- * no reflection. This is the ColorOS 17–safe replacement for the old reflection-based
- * [io.github.threeinone.hook.SystemStateSource].
+ * Collects the indicator state from public Android APIs only — no reflection into SystemUI
+ * internals. This keeps the state layer independent of the OEM's private classes, while the
+ * view layer ([ColorOsAdapter]) follows SuperIcon's ColorOS contract.
  *
- * Battery / charging come from the sticky ACTION_BATTERY_CHANGED broadcast (via
- * [BatterySnapshot]); Wi-Fi from ConnectivityManager + WifiManager; cellular signal,
- * network type, roaming, data-activity and dual-SIM from per-subscription
- * PhoneStateListeners; VPN from ConnectivityManager; traffic arrows from TrafficStats polling.
- *
- * Everything degrades gracefully: without READ_PHONE_STATE the mobile/sim fields simply
- * stay UNKNOWN and the battery + Wi-Fi rings still render.
+ * Everything degrades gracefully: without READ_PHONE_STATE the cellular fields stay UNKNOWN
+ * and the battery / Wi-Fi parts still render.
  */
-class OverlayStateSource(
+class SystemStateSource(
     private val context: Context,
-    private val changed: (IndicatorState) -> Unit
+    private val changed: (IndicatorState) -> Unit,
+    private val failed: (Throwable) -> Unit
 ) {
     private val handler = Handler(Looper.getMainLooper())
     private val executor = Executors.newSingleThreadExecutor()
@@ -130,7 +127,6 @@ class OverlayStateSource(
     fun start() {
         if (running) return
         running = true
-
         val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED).apply {
             addAction(android.os.PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
             addAction(Intent.ACTION_AIRPLANE_MODE_CHANGED)
@@ -146,9 +142,12 @@ class OverlayStateSource(
             netCallback, handler
         )
 
-        // Seed battery + power-save + airplane from the sticky broadcast / settings.
         context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED), Context.RECEIVER_EXPORTED)
-            ?.let { current = BatterySnapshot.apply(current, it) }
+            ?.let {
+                current = BatterySnapshot.apply(current, it)
+                XposedBridge.log("3IN1: sticky battery level=${current.battery} observed=${current.batteryObserved}")
+            }
+            ?: XposedBridge.log("3IN1: no sticky battery broadcast received")
         current = current.copy(powerSave = power.isPowerSaveMode, airplane = isAirplane())
 
         registerSignalListeners()
@@ -166,6 +165,18 @@ class OverlayStateSource(
         telephonyCallbacks.clear()
         simStates.clear()
         simServices.clear()
+    }
+
+    /** Exact Wi-Fi traffic direction, fed by the ColorOS wifi-activity hook. */
+    fun setWifiActivity(direction: Int) {
+        val act = when (direction) {
+            1 -> DataActivity.IN
+            2 -> DataActivity.OUT
+            3 -> DataActivity.BOTH
+            else -> DataActivity.NONE
+        }
+        current = current.copy(wifiActivity = act)
+        emit()
     }
 
     private fun canReadPhone() = context.checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) ==

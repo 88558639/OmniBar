@@ -9,4 +9,5 @@
         <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
         <item name="android:windowSplashScreenBackground">#FFFFFF</item>
     </style>
+    <string-array name="xposed_scope"><item>com.android.systemui</item></string-array>
 </resources>

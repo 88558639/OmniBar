@@ -49,6 +49,37 @@ data class IndicatorConfig(
             else -> tint
         }
     }
+
+    /** Serialise for the SystemUI process (cross-process settings bridge). */
+    fun toBundle(): android.os.Bundle = android.os.Bundle().apply {
+        putBoolean("enabled", enabled)
+        putBoolean("lockscreen", lockscreen)
+        putInt("size", size)
+        putInt("wifiScale", wifiScale)
+        putInt("textScale", textScale)
+        putInt("stroke", stroke)
+        putInt("dotScale", dotScale)
+        putInt("dotSpacing", dotSpacing)
+        putInt("horizontalPadding", horizontalPadding)
+        putInt("verticalOffset", verticalOffset)
+        putBoolean("colors", colors)
+        putInt("chargingColor", chargingColor)
+        putInt("lowColor", lowColor)
+        putInt("criticalColor", criticalColor)
+        putInt("saverColor", saverColor)
+        putInt("lowThreshold", lowThreshold)
+        putInt("criticalThreshold", criticalThreshold)
+        putBoolean("showVpn", showVpn)
+        putBoolean("swap", swap)
+        putInt("roamingColor", roamingColor)
+        putBoolean("dualSim", dualSim)
+        putBoolean("showActivity", showActivity)
+        putBoolean("showNumber", showNumber)
+        putInt("numberScale", numberScale)
+        putBoolean("autoNumber", autoNumber)
+        putInt("numberThreshold", numberThreshold)
+    }
+
     companion object {
         const val PACKAGE = "io.github.threeinone"
         const val FILE = "indicator"
@@ -58,6 +89,41 @@ data class IndicatorConfig(
         const val PROBE_STATUS = "probeStatus"
         const val PROBE_TIME = "probeTime"
         const val PROBE_REVISION = "probeRevision"
+
+        /** Rebuild from the cross-process bundle; falls back to defaults when unavailable. */
+        fun fromBundle(b: android.os.Bundle?): IndicatorConfig {
+            fun bool(key: String, def: Boolean) = b?.let { if (it.containsKey(key)) it.getBoolean(key) else def } ?: def
+            fun int(key: String, def: Int) = b?.let { if (it.containsKey(key)) it.getInt(key) else def } ?: def
+            return IndicatorConfig(
+                enabled = bool("enabled", false),
+                lockscreen = bool("lockscreen", true),
+                size = int("size", 22).coerceIn(16, 44),
+                wifiScale = int("wifiScale", 115).coerceIn(70, 150),
+                textScale = int("textScale", 150).coerceIn(80, 250),
+                stroke = int("stroke", 120).coerceIn(60, 160),
+                dotScale = int("dotScale", 100).coerceIn(60, 140),
+                dotSpacing = int("dotSpacing", 100).coerceIn(70, 125),
+                horizontalPadding = int("horizontalPadding", 2).coerceIn(0, 8),
+                verticalOffset = int("verticalOffset", 0).coerceIn(-4, 4),
+                colors = bool("colors", true),
+                chargingColor = int("chargingColor", 0xFF1CB753.toInt()),
+                lowColor = int("lowColor", 0xFFE7433A.toInt()),
+                criticalColor = int("criticalColor", 0xFFD50000.toInt()),
+                saverColor = int("saverColor", 0xFFFFB300.toInt()),
+                lowThreshold = int("lowThreshold", 20).coerceIn(5, 50),
+                criticalThreshold = int("criticalThreshold", 10).coerceIn(1, 20),
+                showVpn = bool("showVpn", true),
+                swap = bool("swap", false),
+                roamingColor = int("roamingColor", 0xFF2F80ED.toInt()),
+                dualSim = bool("dualSim", false),
+                showActivity = bool("showActivity", false),
+                showNumber = bool("showNumber", false),
+                numberScale = int("numberScale", 115).coerceIn(75, 250),
+                autoNumber = bool("autoNumber", false),
+                numberThreshold = int("numberThreshold", 20).coerceIn(1, 100)
+            )
+        }
+
         fun normalizeNumberMode(p: SharedPreferences): Boolean {
             if (!p.getBoolean("showNumber", false) || !p.getBoolean("autoNumber", false)) return false
             p.edit().putBoolean("autoNumber", false).apply()

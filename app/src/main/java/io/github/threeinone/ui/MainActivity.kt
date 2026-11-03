@@ -1,6 +1,5 @@
 package io.github.threeinone.ui
 
-import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.*
@@ -11,12 +10,11 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.*
-import android.provider.Settings
 import android.view.*
 import android.widget.*
 import io.github.threeinone.config.IndicatorConfig
+import io.github.threeinone.config.PreferenceMigration
 import io.github.threeinone.model.IndicatorState
-import io.github.threeinone.overlay.OverlayService
 import io.github.threeinone.render.IndicatorView
 import io.github.threeinone.R
 import java.text.SimpleDateFormat
@@ -36,10 +34,9 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private val writer = Executors.newSingleThreadExecutor()
     private var previewIndex = 0
+    private var lastProbeToken: String? = null
     private val numberSwitches = mutableMapOf<String, Switch>()
     private var updatingNumberSwitches = false
-    private var pendingEnable = false
-    private var pendingAfter: (() -> Unit)? = null
     private val dark get() = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
     private val ink get() = if (dark) Color.rgb(241, 244, 245) else Color.rgb(25, 31, 33)
     private val muted get() = if (dark) Color.rgb(160, 173, 178) else Color.rgb(94, 109, 115)
@@ -51,15 +48,19 @@ class MainActivity : Activity() {
             val success = prefs.edit().putLong("revision", revision).commit()
             handler.post {
                 if (isDestroyed) return@post
-                saved.text = if (success) "设置已保存" else "保存失败，请重试"
-                if (success) refreshDiagnostics()
+                saved.text = if (success) "设置已保存 · 等待系统回执" else "保存失败，请重试"
+                if (success) probe()
             }
         }
     }
 
     override fun onCreate(bundle: Bundle?) {
         super.onCreate(bundle)
-        prefs = getSharedPreferences(IndicatorConfig.FILE, MODE_PRIVATE)
+        @Suppress("DEPRECATION")
+        prefs = try { getSharedPreferences(IndicatorConfig.FILE, MODE_WORLD_READABLE) }
+        catch (_: SecurityException) { getSharedPreferences(IndicatorConfig.FILE, MODE_PRIVATE) }
+        PreferenceMigration.importOnce(prefs,
+            java.io.File(applicationInfo.dataDir, "shared_prefs/${IndicatorConfig.FILE}.xml"))
         val normalized = IndicatorConfig.normalizeNumberMode(prefs)
         previewIndex = bundle?.getInt("preview", 0)?.coerceIn(IndicatorState.previews.indices) ?: 0
         buildPage()
@@ -73,11 +74,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (pendingEnable && OverlayService.canDrawOverlays(this)) {
-            pendingEnable = false
-            ensurePhoneState { enableOverlay() }
-        }
-        refreshDiagnostics()
+        probe()
     }
 
     override fun onDestroy() {
@@ -88,25 +85,6 @@ class MainActivity : Activity() {
         handler.removeCallbacksAndMessages(null)
         writer.shutdown()
         super.onDestroy()
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (requestCode == OVERLAY_SETTINGS_REQ && pendingEnable &&
-            OverlayService.canDrawOverlays(this)
-        ) {
-            pendingEnable = false
-            ensurePhoneState { enableOverlay() }
-        }
-    }
-
-    override fun onRequestPermissionsResult(
-        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
-    ) {
-        if (requestCode == PHONE_STATE_REQ) {
-            val after = pendingAfter
-            pendingAfter = null
-            after?.invoke()
-        }
     }
 
     private fun buildPage() {
@@ -130,14 +108,14 @@ class MainActivity : Activity() {
         header.addView(label("3IN1", 26f).apply {
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             gravity = Gravity.CENTER_VERTICAL
-        }, LinearLayout.LayoutParams(0, dp(58), 1f))
+        },
+            LinearLayout.LayoutParams(0, dp(58), 1f))
         header.addView(iconButton(android.R.drawable.ic_menu_revert, "恢复默认") {
             AlertDialog.Builder(this).setTitle("恢复默认设置？")
-                .setMessage("恢复全部外观参数并关闭叠加层。")
+                .setMessage("恢复全部外观参数并关闭系统替换。")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("恢复") { _, _ ->
-                    prefs.edit().clear().putBoolean("enabled", false).apply()
-                    OverlayService.stop(this)
+                    prefs.edit().clear().putBoolean(PreferenceMigration.MARKER, true).apply()
                     buildPage(); scheduleSave()
                 }.show()
         })
@@ -185,16 +163,11 @@ class MainActivity : Activity() {
         }
         scroll.addView(controls)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-
-        section("叠加层开关")
-        overlayToggle()
-        permissionButton()
-
-        section("显示选项")
+        section("系统显示")
+        toggle("启用三合一", "enabled", false, confirm = true)
         toggle("锁屏显示三合一", "lockscreen", true)
         toggle("显示 VPN 标记", "showVpn", true)
         toggle("反向布局（侧边徽标）", "swap", false)
-
         section("尺寸与位置")
         slider("整体图标尺寸", "size", 16, 32, 22, "dp")
         slider("中间 Wi-Fi 大小", "wifiScale", 70, 150, 115, "%")
@@ -204,7 +177,6 @@ class MainActivity : Activity() {
         slider("信号点间距", "dotSpacing", 70, 125, 100, "%")
         slider("水平留白", "horizontalPadding", 0, 8, 2, "dp")
         slider("垂直偏移", "verticalOffset", -4, 4, 0, "dp")
-
         section("状态颜色")
         toggle("启用状态颜色", "colors", true)
         colorRow("充电与充满", "chargingColor", 0xFF1CB753.toInt())
@@ -214,27 +186,25 @@ class MainActivity : Activity() {
         colorRow("漫游颜色", "roamingColor", 0xFF2F80ED.toInt())
         slider("低电量阈值", "lowThreshold", 5, 50, 20, "%")
         slider("严重电量阈值", "criticalThreshold", 1, 20, 10, "%")
-
         section("蜂窝增强")
         toggle("双卡信号环", "dualSim", false)
         toggle("显示上下行活动箭头", "showActivity", false)
-
         section("电量数字")
         toggle("始终显示电量数字", "showNumber", false)
         toggle("低于阈值自动显示（含等于）", "autoNumber", false)
         slider("电量数字显示阈值", "numberThreshold", 1, 100, 20, "%")
         slider("电量数字大小", "numberScale", 75, 250, 115, "%")
-
         section("适配诊断")
         val diagnosticsRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        diagnostic = label("尚未启停服务", 13f, muted).apply { setTextIsSelectable(true) }
+        diagnostic = label("尚未收到 SystemUI 回执", 13f, muted).apply { setTextIsSelectable(true) }
         diagnosticsRow.addView(diagnostic, LinearLayout.LayoutParams(0, -2, 1f))
-        diagnosticsRow.addView(iconButton(android.R.drawable.ic_popup_sync, "刷新诊断") { refreshDiagnostics() })
+        diagnosticsRow.addView(iconButton(android.R.drawable.ic_popup_sync, "刷新诊断") { probe() })
         controls.addView(diagnosticsRow)
-        controls.addView(Button(this).apply {
-            text = "停止叠加层并恢复"
-            setOnClickListener { disableOverlay(); buildPage(); scheduleSave() }
-        }, LinearLayout.LayoutParams(-1, dp(52)))
+        val recovery = Button(this).apply {
+            text = "恢复原图标"
+            setOnClickListener { prefs.edit().putBoolean("enabled", false).apply(); buildPage(); scheduleSave() }
+        }
+        controls.addView(recovery, LinearLayout.LayoutParams(-1, dp(52)))
         controls.addView(Button(this).apply {
             text = "关于"
             setOnClickListener {
@@ -242,7 +212,7 @@ class MainActivity : Activity() {
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle("关于 3IN1")
                     .setIcon(R.mipmap.ic_launcher)
-                    .setMessage("版本 $version\n\nColorOS 17 下改用「悬浮窗叠加层」方案：从公开 Android API 读取电量/充电/Wi-Fi/信号，绘制在状态栏上方的悬浮窗里，不再依赖 SystemUI 内部类。")
+                    .setMessage("版本 $version")
                     .setNegativeButton("关闭", null)
                     .setPositiveButton("作者主页") { _, _ ->
                         try {
@@ -254,67 +224,6 @@ class MainActivity : Activity() {
             }
         }, LinearLayout.LayoutParams(-1, dp(52)))
         updatePreview()
-    }
-
-    private fun overlayToggle() {
-        val widget = Switch(this).apply {
-            text = "状态栏叠加层"
-            textSize = 16f
-            setTextColor(ink)
-            setPadding(0, dp(12), 0, dp(12))
-            minHeight = dp(52)
-            isChecked = prefs.getBoolean("enabled", false) && OverlayService.canDrawOverlays(this@MainActivity)
-        }
-        widget.setOnCheckedChangeListener { _, checked ->
-            if (checked) {
-                if (!OverlayService.canDrawOverlays(this@MainActivity)) {
-                    pendingEnable = true
-                    widget.isChecked = false
-                    startActivityForResult(
-                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")),
-                        OVERLAY_SETTINGS_REQ
-                    )
-                    return@setOnCheckedChangeListener
-                }
-                ensurePhoneState { enableOverlay() }
-            } else {
-                disableOverlay()
-            }
-        }
-        controls.addView(widget, LinearLayout.LayoutParams(-1, -2))
-    }
-
-    private fun permissionButton() {
-        controls.addView(Button(this).apply {
-            text = "授予悬浮窗权限"
-            setOnClickListener {
-                startActivityForResult(
-                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")),
-                    OVERLAY_SETTINGS_REQ
-                )
-            }
-        }, LinearLayout.LayoutParams(-1, dp(52)))
-    }
-
-    private fun enableOverlay() {
-        prefs.edit().putBoolean("enabled", true).apply()
-        OverlayService.start(this)
-        refreshDiagnostics()
-    }
-
-    private fun disableOverlay() {
-        prefs.edit().putBoolean("enabled", false).apply()
-        OverlayService.stop(this)
-        refreshDiagnostics()
-    }
-
-    private fun ensurePhoneState(after: () -> Unit) {
-        pendingAfter = after
-        if (checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            after()
-        } else {
-            requestPermissions(arrayOf(Manifest.permission.READ_PHONE_STATE), PHONE_STATE_REQ)
-        }
     }
 
     private fun updatePreview() {
@@ -333,16 +242,32 @@ class MainActivity : Activity() {
         handler.removeCallbacks(sync); handler.postDelayed(sync, 180)
     }
 
-    private fun refreshDiagnostics() {
-        val canOverlay = OverlayService.canDrawOverlays(this)
-        val d = getSharedPreferences("diagnostics", MODE_PRIVATE)
-        val running = d.getBoolean("running", false)
-        val status = d.getString("status", "尚未启停服务") ?: "尚未启停服务"
-        val time = d.getLong("time", 0)
-        val stamp = if (time > 0) SimpleDateFormat("MM-dd HH:mm:ss", Locale.CHINA).format(Date(time)) else ""
-        diagnostic.text = "悬浮窗权限：${if (canOverlay) "已授予" else "未授予（点上方按钮开启）"}\n" +
-            "叠加层服务：${if (running) "运行中" else "未运行"}\n" +
-            "$status\n$stamp"
+    private fun probe() {
+        val token = UUID.randomUUID().toString()
+        lastProbeToken = token
+        sendBroadcast(Intent(IndicatorConfig.REFRESH)
+            .setPackage("com.android.systemui")
+            .putExtra(IndicatorConfig.PROBE_TOKEN, token))
+        handler.postDelayed({ if (!isDestroyed) updateDiagnostics() }, 650)
+        handler.postDelayed({ if (!isDestroyed) updateDiagnostics() }, 2000)
+    }
+
+    private fun updateDiagnostics() {
+        val p = getSharedPreferences("diagnostics", MODE_PRIVATE)
+        val matchedProbe = lastProbeToken != null &&
+            p.getString(IndicatorConfig.PROBE_TOKEN, null) == lastProbeToken
+        val timestamp = if (matchedProbe) p.getLong(IndicatorConfig.PROBE_TIME, 0)
+            else p.getLong("time", 0)
+        val status = if (matchedProbe) p.getString(IndicatorConfig.PROBE_STATUS, "")
+            else p.getString("status", "")
+        val revision = if (matchedProbe) p.getLong(IndicatorConfig.PROBE_REVISION, -1)
+            else p.getLong("revision", -1)
+        val stamp = if (timestamp > 0) SimpleDateFormat("MM-dd HH:mm:ss", Locale.CHINA).format(Date(timestamp)) else ""
+        diagnostic.text = if (matchedProbe) "$status\n$stamp"
+            else "未收到本次回执，请检查 LSPosed 作用域及 SystemUI 是否已重启" +
+                if (timestamp > 0) "\n上次：$status\n$stamp" else ""
+        val received = matchedProbe && revision == prefs.getLong("revision", 0)
+        saved.text = if (received) "设置已保存 · SystemUI 已接收" else "设置已保存 · 系统尚未确认"
     }
 
     private fun section(name: String) {
@@ -354,7 +279,7 @@ class MainActivity : Activity() {
         })
     }
 
-    private fun toggle(title: String, key: String, default: Boolean) {
+    private fun toggle(title: String, key: String, default: Boolean, confirm: Boolean = false) {
         val widget = Switch(this).apply {
             text = title; textSize = 16f; setTextColor(ink); isChecked = prefs.getBoolean(key, default)
             setPadding(0, dp(12), 0, dp(12)); minHeight = dp(52)
@@ -375,7 +300,18 @@ class MainActivity : Activity() {
                     scheduleSave()
                     return@setOnCheckedChangeListener
                 }
-                prefs.edit().putBoolean(key, checked).apply(); scheduleSave()
+                if (confirm && checked) {
+                    internal = true; widget.isChecked = false; internal = false
+                    AlertDialog.Builder(this).setTitle("启用系统图标替换？")
+                        .setMessage("已按 ColorOS 17 的 SuperIcon 契约实现。首次使用请确认：LSPosed 中已启用本模块、作用域包含 SystemUI，并已重启 SystemUI。异常时在 LSPosed 停用本模块并重启即可恢复。不会自动重启系统。")
+                        .setNegativeButton("取消", null)
+                        .setPositiveButton("启用") { _, _ ->
+                            internal = true; widget.isChecked = true; internal = false
+                            prefs.edit().putBoolean(key, true).apply(); scheduleSave()
+                        }.show()
+                } else {
+                    prefs.edit().putBoolean(key, checked).apply(); scheduleSave()
+                }
             }
         }
         controls.addView(widget, LinearLayout.LayoutParams(-1, -2))
@@ -468,9 +404,4 @@ class MainActivity : Activity() {
     private fun hex(color: Int) = String.format(Locale.ROOT, "#%06X", color and 0xFFFFFF)
     private fun dp(value: Int) = dp(value.toFloat())
     private fun dp(value: Float) = kotlin.math.round(value * resources.displayMetrics.density).toInt()
-
-    companion object {
-        private const val OVERLAY_SETTINGS_REQ = 100
-        private const val PHONE_STATE_REQ = 101
-    }
 }
