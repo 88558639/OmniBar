@@ -39,8 +39,11 @@ class IndicatorRenderer {
          * puts its middle on the same line as the "4G" / "5G" text (centre 54) and inside
          * the signal dot ring (centre 53). Below that the fan sagged towards the bottom,
          * above it it floated into the percentage.
+         *
+         * It sits a little lower than that midpoint, so the gap to the percentage above
+         * it is wider than the one to the battery arc below it.
          */
-        const val WIFI_CENTER_Y = 66f
+        const val WIFI_CENTER_Y = 70f
 
         /** Radii of the Wi-Fi arcs (outermost first); two arcs plus the dot make three steps. */
         val WIFI_ARC_RADII = floatArrayOf(25f, 13f)
@@ -48,7 +51,7 @@ class IndicatorRenderer {
         /**
          * How far the number hangs below the font ascent.
          *
-         * The Wi-Fi fan reaches up to y = 35, so the percentage has to sit above that:
+         * The Wi-Fi fan reaches up to y = 39, so the percentage has to sit above that:
          * with a small negative offset its glyphs end at y = 31 and the fan no longer
          * runs into the digits.
          */
@@ -417,10 +420,11 @@ class IndicatorRenderer {
         fill(tint, if (state.wifiLevel >= 1 && state.wifi != WifiPhase.CONNECTING) 255 else 55)
         canvas.drawCircle(50f, WIFI_CENTER_Y, 3.4f, paint)
         canvas.restoreToCount(wSave)
+        // The markers belong to the fan, so they follow it down.
         if (state.wifi in setOf(WifiPhase.NO_INTERNET, WifiPhase.CAPTIVE)) {
-            text(canvas, if (state.wifi == WifiPhase.CAPTIVE) "?" else "!", 73f, 49f, 14f, tint)
+            text(canvas, if (state.wifi == WifiPhase.CAPTIVE) "?" else "!", 73f, WIFI_CENTER_Y - 17f, 14f, tint)
         } else if (state.wifi == WifiPhase.CONNECTING) {
-            text(canvas, "...", 50f, 55f, 12f, tint)
+            text(canvas, "...", 50f, WIFI_CENTER_Y - 11f, 12f, tint)
         }
     }
 

@@ -119,9 +119,9 @@ class RenderingTest {
     }
 
     @Test fun wifiHasThreeSignalSteps() {
-        // The fan sits at (50, 66) — centred where the network label is: a centre dot
-        // plus two arcs whose apexes are at y = 53 (r = 13) and y = 41 (r = 25).
-        val probes = listOf(198 to 66, 159 to 53, 123 to 41)
+        // The fan sits at (50, 70) — centred where the network label is: a centre dot
+        // plus two arcs whose apexes are at y = 57 (r = 13) and y = 45 (r = 25).
+        val probes = listOf(210 to 70, 171 to 57, 135 to 45)
         // Three steps: dot only, dot + inner arc, dot + both arcs.
         for (level in 0..4) {
             val b = render(IndicatorState.demo.copy(wifiLevel = level), IndicatorConfig(wifiScale = 115))
