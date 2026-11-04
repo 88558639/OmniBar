@@ -1,5 +1,6 @@
 package io.github.threeinone.hook
 
+import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -313,6 +314,7 @@ class SystemStateSource(
      * registers the subscriptions a few seconds late, so a single read at start-up
      * would leave the indicator without any cellular signal.
      */
+    @SuppressLint("MissingPermission")
     private fun refreshSubscriptions() {
         if (!canReadPhone()) return
         val active = runCatching { subs.activeSubscriptionInfoList }.getOrNull().orEmpty()
@@ -328,6 +330,7 @@ class SystemStateSource(
         }
     }
 
+    @SuppressLint("MissingPermission")
     private fun registerSim(id: Int, slot: Int) {
         val tm = if (SubscriptionManager.isValidSubscriptionId(id)) {
             runCatching { telephony.createForSubscriptionId(id) }.getOrDefault(telephony)

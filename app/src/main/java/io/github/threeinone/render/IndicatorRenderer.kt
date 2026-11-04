@@ -47,6 +47,28 @@ class IndicatorRenderer {
 
         /** Alpha of an unlit signal dot — faint enough to read as an empty slot. */
         const val DOT_EMPTY_ALPHA = 38
+
+        /**
+         * Font size of the cellular label ("4G" / "5G") at 100 % text scale. The label
+         * takes the place of the Wi-Fi fan, so it is sized to match that fan: at the
+         * default text scale a bold two-character label is about as wide as the fan.
+         */
+        const val NETWORK_LABEL_BASE_SIZE = 21f
+
+        /** Largest the label may become — beyond that it would reach the signal dots. */
+        const val NETWORK_LABEL_MAX_SIZE = 52f
+
+        /** Smallest the label may become. */
+        const val NETWORK_LABEL_MIN_SIZE = 12f
+
+        /** Top of the label band — level with the apex of the Wi-Fi fan. */
+        const val NETWORK_LABEL_TOP = 47f
+
+        /** Widest the label may get before it would touch the signal dots. */
+        const val NETWORK_LABEL_MAX_WIDTH = 60f
+
+        /** The "--" placeholder is drawn smaller than a real network type. */
+        const val PLACEHOLDER_SIZE_RATIO = 0.62f
     }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -73,10 +95,9 @@ class IndicatorRenderer {
             } else if (state.wifiConnected || state.wifi == WifiPhase.CONNECTING) {
                 wifiFan(canvas, config, tint, state)
             } else if (state.sim == SimPhase.READY) {
-                text(canvas, state.networkType.ifBlank { "--" }, 50f, 57f,
-                    14f * config.textScale / 100f, tint, 60f, centerVertically = true)
+                drawNetworkLabel(canvas, state.networkType.ifBlank { "--" }, config, tint)
             } else {
-                text(canvas, "--", 50f, 57f, 17f, tint)
+                drawNetworkLabel(canvas, "--", config, tint, PLACEHOLDER_SIZE_RATIO)
             }
 
             val spread = config.dotSpacing / 100f
@@ -123,6 +144,29 @@ class IndicatorRenderer {
         } else {
             canvas.drawText(value, 50f, baseline, paint)
         }
+    }
+
+    // ------------------------------------------------------------------ network label
+
+    /**
+     * Draws the cellular type ("4G" / "5G") in the band the Wi-Fi fan occupies.
+     *
+     * The label hangs from the same top edge as the Wi-Fi fan (y = 47) and grows
+     * downwards, exactly like the battery percentage above it. That way a large text
+     * scale can never run into the percentage, and the label still clears the battery
+     * arc at the bottom — the width is clamped so it never reaches the signal dots.
+     */
+    private fun drawNetworkLabel(
+        canvas: Canvas, value: String, config: IndicatorConfig, tint: Int, ratio: Float = 1f
+    ) {
+        val size = (NETWORK_LABEL_BASE_SIZE * config.textScale / 100f * ratio)
+            .coerceIn(NETWORK_LABEL_MIN_SIZE, NETWORK_LABEL_MAX_SIZE)
+        prepareText(value, size, tint, NETWORK_LABEL_MAX_WIDTH)
+        val bounds = Rect()
+        paint.getTextBounds(value, 0, value.length, bounds)
+        // The ink starts at the top of the band and runs downwards.
+        val baseline = NETWORK_LABEL_TOP - bounds.top
+        canvas.drawText(value, 50f, baseline, paint)
     }
 
     // ------------------------------------------------------------------ signal dots

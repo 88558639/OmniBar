@@ -151,21 +151,49 @@ class RenderingTest {
         val noSim5g = render(IndicatorState.demo.copy(wifi = WifiPhase.OFF,
             sim = SimPhase.NO_SIGNAL, networkType = "5G"))
         assertTrue("No network type without a ready SIM", noSim4g.sameAs(noSim5g))
+        // Only the "--" placeholder may remain: no digit-shaped glyph is drawn.
         assertEquals("Only the placeholder may remain", 0, ink(noSim4g, 110, 190, 160, 190))
         // The fallback is the small "--" placeholder in the middle of the fan.
-        assertTrue("Placeholder missing", ink(noSim4g, 110, 190, 150, 160) > 0)
+        assertTrue("Placeholder missing", ink(noSim4g, 110, 190, 130, 165) > 0)
     }
 
-    @Test fun networkLabelIsCentredOnTheFanPosition() {
+    @Test fun networkLabelStartsAtTheTopOfTheFanBand() {
         for (label in listOf("2G", "3G", "4G", "5G")) {
             val b = render(IndicatorState.demo.copy(wifi = WifiPhase.OFF, networkType = label))
             // Scan only the label's own band: the percentage number above and the signal
             // dots at the sides must not influence the measurement.
             val rows = (130..215).filter { y -> (100..200).any { x -> Color.alpha(b.getPixel(x, y)) > 128 } }
             assertTrue(rows.isNotEmpty())
-            // The label is centred on y = 57 units.
-            assertEquals(57f, (rows.first() + rows.last()) / 6f, 1f)
+            // The label hangs from the top of the band (y = 47 units) like the Wi-Fi fan.
+            assertEquals(47f, rows.first() / 3f, 1.5f)
         }
+    }
+
+    @Test fun networkLabelIsMuchLargerThanTheBatteryPercentage() {
+        // The network type replaces the Wi-Fi fan, so it has to read as a prominent
+        // label — not as a caption squeezed below the percentage.
+        for (label in listOf("4G", "5G")) {
+            val b = render(IndicatorState.demo.copy(wifi = WifiPhase.OFF, networkType = label))
+            val rows = (140..250).filter { y -> (100..200).any { x -> Color.alpha(b.getPixel(x, y)) > 128 } }
+            assertTrue(rows.isNotEmpty())
+            // The glyph is at least 12 units tall (36 px on the 300 px test canvas).
+            assertTrue("$label is still too small: ${rows.size} rows", rows.size >= 36)
+        }
+    }
+
+    @Test fun aLargeNetworkLabelNeverOverlapsThePercentageOrTheArc() {
+        // Even at the top of the text scale the label must stay clear of the battery
+        // percentage above it and of the battery arc below it.
+        val state = IndicatorState.demo.copy(wifi = WifiPhase.OFF, networkType = "5G")
+        val b = render(state, IndicatorConfig(textScale = 250))
+        // The percentage occupies the top of the canvas; the label starts below it.
+        val labelRows = (140..260).filter { y -> (100..200).any { x -> Color.alpha(b.getPixel(x, y)) > 128 } }
+        assertTrue(labelRows.isNotEmpty())
+        assertTrue("The label must start below the percentage", labelRows.first() >= 138)
+        // The battery arc is drawn on the ring around (50, 53) with radius 44 — its
+        // lowest point in the middle column is far below, but the arc's upper ends
+        // reach y = 53 + 44 * sin(45°) ≈ 84 units, so the label must end above that.
+        assertTrue("The label must clear the battery arc", labelRows.last() < 84 * 3)
     }
 
     @Test fun dualSimPutsTheMainCardOnTheLeftAndTheSecondaryOnTheRight() {
