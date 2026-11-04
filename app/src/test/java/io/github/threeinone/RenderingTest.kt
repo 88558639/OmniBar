@@ -117,9 +117,9 @@ class RenderingTest {
     }
 
     @Test fun wifiHasThreeSignalSteps() {
-        // The fan sits at (50, 72): a centre dot plus two arcs whose apexes are
-        // at y = 59 (r = 13) and y = 47 (r = 25).
-        val probes = listOf(216 to 72, 177 to 59, 141 to 47)
+        // The fan sits at (50, 66) — centred where the network label is: a centre dot
+        // plus two arcs whose apexes are at y = 53 (r = 13) and y = 41 (r = 25).
+        val probes = listOf(198 to 66, 159 to 53, 123 to 41)
         // Three steps: dot only, dot + inner arc, dot + both arcs.
         for (level in 0..4) {
             val b = render(IndicatorState.demo.copy(wifiLevel = level), IndicatorConfig(wifiScale = 115))
@@ -144,28 +144,39 @@ class RenderingTest {
         val ready4g = render(IndicatorState.demo.copy(wifi = WifiPhase.OFF, networkType = "4G"))
         val ready5g = render(IndicatorState.demo.copy(wifi = WifiPhase.OFF, networkType = "5G"))
         assertFalse("The network type must be rendered when the SIM is ready", ready4g.sameAs(ready5g))
-        assertTrue("No network type glyphs", ink(ready4g, 110, 190, 160, 190) > 200)
+        assertTrue("No network type glyphs", ink(ready4g, 110, 190, 130, 190) > 200)
 
         val noSim4g = render(IndicatorState.demo.copy(wifi = WifiPhase.OFF,
             sim = SimPhase.NO_SIGNAL, networkType = "4G"))
         val noSim5g = render(IndicatorState.demo.copy(wifi = WifiPhase.OFF,
             sim = SimPhase.NO_SIGNAL, networkType = "5G"))
         assertTrue("No network type without a ready SIM", noSim4g.sameAs(noSim5g))
-        // Only the "--" placeholder may remain: no digit-shaped glyph is drawn.
-        assertEquals("Only the placeholder may remain", 0, ink(noSim4g, 110, 190, 160, 190))
-        // The fallback is the small "--" placeholder in the middle of the fan.
-        assertTrue("Placeholder missing", ink(noSim4g, 110, 190, 130, 165) > 0)
+
+        // The real label fills the band; the "--" placeholder is a small dash pair in
+        // the middle of it. No digit-shaped glyph may survive.
+        val labelRows = inkRows(ready4g, 110, 190, 120, 230)
+        val dashRows = inkRows(noSim4g, 110, 190, 120, 230)
+        assertTrue("Placeholder missing", dashRows.isNotEmpty())
+        assertTrue("The placeholder must be smaller than the label",
+            dashRows.size < labelRows.size)
+        assertTrue("The placeholder must sit inside the label band",
+            dashRows.first() >= labelRows.first() && dashRows.last() <= labelRows.last())
     }
 
-    @Test fun networkLabelStartsAtTheTopOfTheFanBand() {
+    @Test fun networkLabelIsCentredInTheFanBand() {
         for (label in listOf("2G", "3G", "4G", "5G")) {
             val b = render(IndicatorState.demo.copy(wifi = WifiPhase.OFF, networkType = label))
-            // Scan only the label's own band: the percentage number above and the signal
-            // dots at the sides must not influence the measurement.
-            val rows = (130..215).filter { y -> (100..200).any { x -> Color.alpha(b.getPixel(x, y)) > 128 } }
-            assertTrue(rows.isNotEmpty())
-            // The label hangs from the top of the band (y = 47 units) like the Wi-Fi fan.
-            assertEquals(47f, rows.first() / 3f, 1.5f)
+            // Scan only the label's own column band: the percentage number above and the signal
+            // dots at the sides must not influence the measurement. The window starts
+            // below the percentage (which ends at y = 38 units).
+            val rows = inkRows(b, 100, 200, 120, 230)
+            assertTrue("No glyph for $label", rows.isNotEmpty())
+            // The label is centred in the dot ring (ring centre y = 53, fan centre 55),
+            // so it must not sag towards the bottom of the indicator any more.
+            val centre = (rows.first() + rows.last()) / 2f / 3f
+            assertEquals("$label is not centred in the fan band", 54f, centre, 4f)
+            // …and it must stay clear of the percentage number above it.
+            assertTrue("$label reaches into the percentage", rows.first() / 3f > 36f)
         }
     }
 
@@ -327,6 +338,12 @@ class RenderingTest {
         for (y in y0..y1) for (x in x0..x1) if (Color.alpha(b.getPixel(x, y)) > 0) n++
         return n
     }
+
+    /** The rows of a column band that carry any ink; the indicator is 100 units wide. */
+    private fun inkRows(b: Bitmap, x0: Int, x1: Int, y0: Int = 0, y1: Int = b.height - 1): List<Int> =
+        (y0..y1).filter { y ->
+            (x0..x1).any { x -> Color.alpha(b.getPixel(x, y)) > 128 }
+        }
 
     /**
      * Draws the indicator into a padded canvas and measures how far the ink

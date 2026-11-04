@@ -3,65 +3,78 @@ package io.github.threeinone.render
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
-import android.os.Build
 import android.view.View
-import android.view.WindowInsets
 import io.github.threeinone.config.IndicatorConfig
 import io.github.threeinone.model.IndicatorState
-import kotlin.math.min
 
 class IndicatorView(context: Context) : View(context) {
     private val renderer = IndicatorRenderer()
     private var aligned = false
+    private var anchorListener: View.OnLayoutChangeListener? = null
 
     /**
-     * Height of the status bar itself.
+     * The native icon row the indicator has to sit on the same line with.
      *
-     * The battery view the indicator lives in is parked at the bottom of the bar, so the
-     * content ends up in the lower half of it. The bar height is the reference the content
-     * has to be aligned to.
+     * On this firmware the battery lives on the **left** of the status bar, next to the
+     * clock, the alarm and the bluetooth icon. The container of those icons is the
+     * reference: the indicator is centred on it, so it never drifts away from the row.
      */
-    private val statusBarHeight: Int
-        get() {
-            val insets = rootWindowInsets
-            val cutout = insets?.displayCutout?.safeInsetTop ?: 0
-            val bars = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                insets?.getInsets(WindowInsets.Type.statusBars())?.top ?: 0
-            } else 0
-            val measured = maxOf(cutout, bars)
-            if (measured > 0) return measured
-            val id = resources.getIdentifier("status_bar_height", "dimen", "android")
-            return if (id > 0) resources.getDimensionPixelSize(id) else height
+    var alignmentAnchor: View? = null
+        set(value) {
+            if (field === value) return
+            field?.let { old -> anchorListener?.let { old.removeOnLayoutChangeListener(it) } }
+            anchorListener = null
+            field = value
+            value?.let { anchor ->
+                val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                    aligned = false
+                    post { alignToStatusBar() }
+                }
+                anchorListener = listener
+                anchor.addOnLayoutChangeListener(listener)
+            }
+            aligned = false
+            post { alignToStatusBar() }
         }
 
     /**
-     * Places the indicator inside the status bar.
+     * Centres the indicator on the native icon row.
      *
-     * The view is exactly as tall as its content, so the content cannot be moved upwards
-     * inside the view — the view itself has to be translated. The target is the vertical
-     * centre of the status bar (where the native icons sit), lifted a little further.
+     * The view is exactly as tall as its content and lives inside the battery view, which
+     * sits lower than the other icons. The icon row next to it is the reference: the
+     * indicator is centred on that row, so the percentage, the charging bolt and the signal
+     * ring sit on one horizontal line with the clock, the alarm and the bluetooth icon.
+     *
+     * Nothing inside the indicator is moved here — the internal layout (Wi-Fi fan, network
+     * label) is the renderer's business. Only the whole group is placed.
      */
     private fun alignToStatusBar() {
         if (!alignInStatusBar || aligned || width <= 0 || height <= 0) return
-        val bar = statusBarHeight
-        if (bar <= 0) return
-        val scale = min(width, height) / 100f
-        val contentHeight = 100f * scale
-        val target = (bar - contentHeight) / 2f - EXTRA_SHIFT_DP * resources.displayMetrics.density
+        val anchor = alignmentAnchor
         val location = IntArray(2)
         getLocationOnScreen(location)
-        val absoluteTop = location[1]
-        // Only the views that really live in the status bar are moved; secondary displays
-        // and the always-on screen keep their own position.
-        if (absoluteTop > bar) {
-            aligned = true
-            return
+        // getLocationOnScreen() already contains the current translation, so remove it to
+        // get the laid-out position; the shift is applied to that.
+        val layoutTop = location[1] - translationY
+        var anchorTop = -1
+        var anchorHeight = -1
+        val target = if (anchor != null && anchor.height > 0) {
+            val anchorLocation = IntArray(2)
+            anchor.getLocationOnScreen(anchorLocation)
+            anchorTop = anchorLocation[1]
+            anchorHeight = anchor.height
+            // The drawn content is centred in the view, so centring the views puts the
+            // indicator on the same line as the native icons.
+            anchorTop + anchorHeight / 2f - height / 2f
+        } else {
+            layoutTop
         }
-        translationY = target - absoluteTop
+        translationY = target - layoutTop
         aligned = true
         de.robv.android.xposed.XposedBridge.log(
-            "3IN1: aligned shift=${translationY} top=$absoluteTop target=$target bar=$bar " +
-                "w=$width h=$height scale=$scale")
+            "3IN1: aligned shift=${translationY} top=$layoutTop target=$target " +
+                "anchorTop=$anchorTop anchorH=$anchorHeight w=$width h=$height"
+        )
     }
 
     var config = IndicatorConfig()
@@ -96,10 +109,5 @@ class IndicatorView(context: Context) : View(context) {
         super.onDraw(canvas)
         if (!aligned) alignToStatusBar()
         renderer.draw(canvas, width.toFloat(), height.toFloat(), state, config, tint)
-    }
-
-    private companion object {
-        /** Extra lift on top of the status bar centre, in device independent pixels. */
-        const val EXTRA_SHIFT_DP = 3f
     }
 }

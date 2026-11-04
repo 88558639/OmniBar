@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.graphics.Color
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -239,9 +240,17 @@ class ColorOsAdapter(private val loader: ClassLoader) {
         // the status bar. Nothing on the way up may clip it.
         var clipper: ViewGroup? = host
         while (clipper != null) {
-            clipper.clipChildren = false
+            if (clipper.clipChildren) {
+                session.unclipped.add(clipper)
+                clipper.clipChildren = false
+            }
             clipper = clipper.parent as? ViewGroup
         }
+        // Alignment reference: the native icon (bluetooth / alarm) the indicator has to
+        // share a line with. Without one the indicator keeps its original place — that is
+        // where it already lined up with the other icons.
+        session.indicator.alignmentAnchor = findNativeIcon(root)
+        logHierarchy(session)
         host.addView(session.indicator, ViewGroup.LayoutParams(
             (config.size * density(root)).toInt(), ViewGroup.LayoutParams.MATCH_PARENT))
         root.viewTreeObserver.addOnGlobalLayoutListener(session.layoutListener)
@@ -267,21 +276,84 @@ class ColorOsAdapter(private val loader: ClassLoader) {
         var parent = view.parent
         var depth = 0
         while (parent is ViewGroup && depth < 6) {
-            if (containsIcons(parent)) return parent
+            if (parent.javaClass.name == ICONS) return parent
+            val nested = findNestedIconContainer(parent)
+            if (nested != null) return nested
             parent = parent.parent
             depth++
+    }
+        return null
+    }
+
+    /** The StatusIconContainer inside a wrapper, if there is one. */
+    private fun findNestedIconContainer(view: ViewGroup): ViewGroup? {
+        for (i in 0 until view.childCount) {
+            val child = view.getChildAt(i)
+            if (child.javaClass.name == ICONS) return child as ViewGroup
+            if (child is ViewGroup) {
+                val deep = findNestedIconContainer(child)
+                if (deep != null) return deep
+            }
         }
         return null
     }
 
-    private fun containsIcons(view: View): Boolean {
-        if (view.javaClass.name == ICONS) return true
-        if (view is ViewGroup) {
-            for (i in 0 until view.childCount) {
-                if (containsIcons(view.getChildAt(i))) return true
-            }
+    /**
+     * The native icon the indicator has to share a horizontal line with.
+     *
+     * On this firmware the battery sits on the **left** of the status bar, next to the
+     * clock, the alarm and the bluetooth icon. Those icons are the reference: the
+     * indicator is centred on one of them, which is a lot more precise than the icon
+     * row container (that one also spans the whole bar).
+     */
+    private fun findNativeIcon(root: ViewGroup): View? {
+        var best: View? = null
+        collectNativeIcons(root) { view ->
+            if (view.visibility != View.VISIBLE || view.height <= 0) return@collectNativeIcons
+            if (best == null) best = view
         }
-        return false
+        return best
+    }
+
+    /** Walks the icon row and reports every bluetooth / alarm icon it contains. */
+    private fun collectNativeIcons(view: View, onFound: (View) -> Unit) {
+        val simple = view.javaClass.simpleName
+        val entry = runCatching {
+            if (view.id != View.NO_ID) view.resources.getResourceEntryName(view.id) else ""
+        }.getOrDefault("")
+        val name = "$simple/$entry".lowercase()
+        if (name.contains("bluetooth") || name.contains("alarm")) onFound(view)
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) collectNativeIcons(view.getChildAt(i), onFound)
+        }
+    }
+
+    /**
+     * Dumps the placement of the indicator and of the native icons.
+     *
+     * The vertical alignment cannot be checked from a screenshot alone (the status bar is
+     * only a few pixels tall), so the numbers are written to the module log.
+     */
+    private fun logHierarchy(session: Session) {
+        val anchor = session.indicator.alignmentAnchor
+        val rect = Rect()
+        anchor?.getGlobalVisibleRect(rect)
+        val hostRect = Rect()
+        session.host.getGlobalVisibleRect(hostRect)
+        val rowRect = Rect()
+        session.root.getGlobalVisibleRect(rowRect)
+        XposedBridge.log(
+            "3IN1: anchor=${anchor?.javaClass?.simpleName} anchorRect=${rect.top}..${rect.bottom} " +
+                "host=${session.host.javaClass.simpleName} hostRect=${hostRect.top}..${hostRect.bottom} " +
+                "row=${session.root.javaClass.simpleName} rowRect=${rowRect.top}..${rowRect.bottom}"
+        )
+        val names = mutableListOf<String>()
+        collectNativeIcons(session.root) { view ->
+            val r = Rect()
+            view.getGlobalVisibleRect(r)
+            names.add("${view.javaClass.simpleName}@${r.top}..${r.bottom}")
+        }
+        if (names.isNotEmpty()) XposedBridge.log("3IN1: native icons ${names.joinToString(", ")}")
     }
 
     private fun initialize(c: Context) {
@@ -630,8 +702,8 @@ class ColorOsAdapter(private val loader: ClassLoader) {
         session.indicator.visibility = View.GONE
         for (group in session.unclipped) {
             runCatching {
-                group.clipChildren = false
-                group.clipToPadding = false
+                group.clipChildren = true
+                group.clipToPadding = true
             }
         }
         session.unclipped.clear()

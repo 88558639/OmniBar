@@ -30,20 +30,34 @@ class IndicatorRenderer {
         /** Signal dot radius. */
         const val SIGNAL_DOT_RADIUS = 5.4f
 
-        /** Centre of the Wi-Fi fan, matched to the reference pill. */
-        const val WIFI_CENTER_Y = 72f
+        /**
+         * Centre of the Wi-Fi fan.
+         *
+         * The fan takes the place of the network label, so it has to sit exactly where the
+         * label sits: the glyph runs from y = 35 (arc apex) to y = 69 (the dot), which
+         * puts its middle on the same line as the "4G" / "5G" text (centre 54) and inside
+         * the signal dot ring (centre 53). Below that the fan sagged towards the bottom,
+         * above it it floated into the percentage.
+         */
+        const val WIFI_CENTER_Y = 66f
 
         /** Radii of the Wi-Fi arcs (outermost first); two arcs plus the dot make three steps. */
         val WIFI_ARC_RADII = floatArrayOf(25f, 13f)
 
-        /** Baseline of the battery percentage number. */
-        const val NUMBER_BASELINE = 28f
+        /**
+         * How far the number hangs below the font ascent.
+         *
+         * The Wi-Fi fan reaches up to y = 35, so the percentage has to sit above that:
+         * with a small negative offset its glyphs end at y = 31 and the fan no longer
+         * runs into the digits.
+         */
+        const val NUMBER_ASCENT_OFFSET = -5.5f
 
         /** The number may grow at most this tall (its top stays ~1.5 units below the edge). */
         const val NUMBER_MAX_ASCENT = 43.5f
 
-        /** …and may not reach into the Wi-Fi fan (whose apex is at y = 47). */
-        const val NUMBER_MAX_BASELINE = 45f
+        /** …and it may not sink past the Wi-Fi fan (whose apex is at y = 35). */
+        const val NUMBER_MAX_BASELINE = 38f
 
         /** Widest the number may get before it would touch the signal dots. */
         const val NUMBER_MAX_WIDTH = 60f
@@ -64,8 +78,13 @@ class IndicatorRenderer {
         /** Smallest the label may become. */
         const val NETWORK_LABEL_MIN_SIZE = 12f
 
-        /** Top of the label band — level with the apex of the Wi-Fi fan. */
-        const val NETWORK_LABEL_TOP = 47f
+        /**
+         * Centre of the label band.
+         *
+         * The label takes the place of the Wi-Fi fan, so it is centred where the fan is:
+         * in the middle of the signal dot ring instead of sagging towards the bottom.
+         */
+        const val NETWORK_LABEL_CENTER = 54f
 
         /** Widest the label may get before it would touch the signal dots. */
         const val NETWORK_LABEL_MAX_WIDTH = 60f
@@ -142,7 +161,7 @@ class IndicatorRenderer {
             paint.textSize *= NUMBER_MAX_ASCENT / ascent
             ascent = -paint.fontMetrics.ascent
         }
-        val baseline = (ascent + 1.5f).coerceAtMost(NUMBER_MAX_BASELINE)
+        val baseline = (ascent + NUMBER_ASCENT_OFFSET).coerceAtMost(NUMBER_MAX_BASELINE)
         // A three-digit reading is too wide for the gap between the signal dots: squeeze it
         // horizontally instead of shrinking it, so the height still follows the slider.
         val width = paint.measureText(value)
@@ -175,8 +194,8 @@ class IndicatorRenderer {
         prepareText(value, size, tint, NETWORK_LABEL_MAX_WIDTH)
         val bounds = Rect()
         paint.getTextBounds(value, 0, value.length, bounds)
-        // The ink starts at the top of the band and runs downwards.
-        val baseline = NETWORK_LABEL_TOP - bounds.top
+        // Centred in the band, so the label sits in the middle of the dot ring.
+        val baseline = NETWORK_LABEL_CENTER - bounds.top - bounds.height() / 2f
         canvas.drawText(value, 50f, baseline, paint)
     }
 
@@ -336,9 +355,9 @@ class IndicatorRenderer {
         canvas.drawCircle(50f, WIFI_CENTER_Y, 3.4f, paint)
         canvas.restoreToCount(wSave)
         if (state.wifi in setOf(WifiPhase.NO_INTERNET, WifiPhase.CAPTIVE)) {
-            text(canvas, if (state.wifi == WifiPhase.CAPTIVE) "?" else "!", 73f, 66f, 14f, tint)
+            text(canvas, if (state.wifi == WifiPhase.CAPTIVE) "?" else "!", 73f, 49f, 14f, tint)
         } else if (state.wifi == WifiPhase.CONNECTING) {
-            text(canvas, "...", 50f, 72f, 12f, tint)
+            text(canvas, "...", 50f, 55f, 12f, tint)
         }
     }
 
