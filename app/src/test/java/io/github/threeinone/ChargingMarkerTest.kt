@@ -85,13 +85,14 @@ class ChargingMarkerTest {
     }
 
     @Test fun fullChargeShowsTheNumberAtTopAndDrawsTheCompleteArc() {
-        val full = render(IndicatorState.demo.copy(battery = 100, batteryPhase = BatteryPhase.FULL),
-            IndicatorConfig())
-        val normal = render(IndicatorState.demo.copy(battery = 100), IndicatorConfig())
+        val cfg = IndicatorConfig()
+        val full = render(IndicatorState.demo.copy(battery = 100, batteryPhase = BatteryPhase.FULL), cfg)
+        val normal = render(IndicatorState.demo.copy(battery = 100), cfg)
 
-        // The percentage is drawn at the top in the charging colour.
+        // The percentage is drawn at the top in the charging colour. No protocol could
+        // be read here, so that is the unknown-protocol one.
         val greenAtTop = (0..40).sumOf { y ->
-            (0..299).count { x -> full.getPixel(x, y) == 0xff1cb753.toInt() }
+            (0..299).count { x -> full.getPixel(x, y) == cfg.unknownColor }
         }
         assertTrue("Full charge must paint the number in the charging colour", greenAtTop > 500)
         // "100" is three separate digits. The charging bolt is a badge in the top
@@ -114,7 +115,7 @@ class ChargingMarkerTest {
             val rad = Math.toRadians(deg.toDouble())
             val x = ((50 + 44 * cos(rad)).roundToInt() * 3)
             val y = ((53 + 44 * sin(rad)).roundToInt() * 3)
-            assertEquals("Gap in the full arc at $deg°", 0xff1cb753.toInt(), full.getPixel(x, y))
+            assertEquals("Gap in the full arc at $deg°", cfg.unknownColor, full.getPixel(x, y))
         }
 
         // The network part of the indicator is unaffected by the charging state.

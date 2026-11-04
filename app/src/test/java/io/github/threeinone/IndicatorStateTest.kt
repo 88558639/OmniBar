@@ -20,7 +20,7 @@ class IndicatorStateTest {
 
     @Test fun chargingWinsThenLowThenSaver() {
         val lowSaver = demo.copy(battery = 12, powerSave = true)
-        assertEquals(config.chargingColor, config.batteryColor(lowSaver.copy(batteryPhase = BatteryPhase.CHARGING), 123))
+        assertEquals(config.unknownColor, config.batteryColor(lowSaver.copy(batteryPhase = BatteryPhase.CHARGING), 123))
         assertEquals(config.lowColor, config.batteryColor(lowSaver, 123))
         // saverColor (#FFB300) has <1.2:1 worst-case contrast, so ensureVisible lifts it;
         // the drawn colour is the lifted value, not the raw preference.
@@ -32,7 +32,7 @@ class IndicatorStateTest {
 
     @Test fun pausedDoesNotMasqueradeAsCharging() {
         assertEquals(123, config.batteryColor(demo.copy(batteryPhase = BatteryPhase.PAUSED), 123))
-        assertEquals(config.chargingColor, config.batteryColor(demo.copy(batteryPhase = BatteryPhase.FULL), 123))
+        assertEquals(config.unknownColor, config.batteryColor(demo.copy(batteryPhase = BatteryPhase.FULL), 123))
     }
 
     @Test fun dotsUseOnlyValidSignalAndRespectAirplane() {

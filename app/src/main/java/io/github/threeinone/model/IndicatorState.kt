@@ -5,10 +5,14 @@ enum class WifiPhase { OFF, DISCONNECTED, CONNECTING, CONNECTED, NO_INTERNET, CA
 enum class SimPhase { READY, NO_SIGNAL, EMERGENCY, ABSENT, DISABLED, LOCKED, UNKNOWN }
 
 /**
- * Detected charging protocol. [NONE] means the firmware did not report enough information
- * — in that case the legacy charging colour is kept instead of guessing.
+ * Detected charging protocol.
+ *
+ * [SUPER_VOOC] is the proprietary OnePlus/OPPO rail, which only the original charger
+ * negotiates. [UFCS] is the public USB fast-charge standard — the original charger
+ * speaks it as well, but a third-party charger is what it usually means. [NONE] means
+ * the firmware did not report enough information.
  */
-enum class ChargeProtocol { NONE, SLOW, FAST, PPS, SUPER_VOOC }
+enum class ChargeProtocol { NONE, SLOW, FAST, PPS, UFCS, SUPER_VOOC }
 
 /**
  * Data-traffic activity, matching Android's [android.telephony.TelephonyManager] data-activity

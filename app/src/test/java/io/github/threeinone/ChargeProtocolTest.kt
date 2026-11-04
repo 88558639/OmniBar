@@ -31,25 +31,26 @@ class ChargeProtocolTest {
         voltageMv, currentMa, wattage, charging
     )
 
-    @Test fun originalChargerIsRecognisedByItsPower() {
-        // The original OnePlus charger reports UFCS as the charge technology but
-        // negotiates 100 W and above — that is what identifies the proprietary rail.
+    @Test fun originalChargerIsRecognisedByItsTechnologyLevel() {
+        // The charging IC reports the capabilities of the charger: the original
+        // OnePlus charger reaches the VOOC level, a plain USB charger stays at 0.
         assertEquals(
             ChargeProtocol.SUPER_VOOC,
-            detect(chargeTech = 14, plugged = 1, wattage = 120)
+            detect(chargeTech = 14, chargeTechnology = 3, plugged = 1)
+        )
+        // The original charger speaks UFCS too — the level is what tells them apart.
+        assertEquals(
+            ChargeProtocol.SUPER_VOOC,
+            detect(chargeTech = 14, chargeTechnology = 3, plugged = 1, wattage = 120)
         )
     }
 
     @Test fun thirdPartyUfcsChargerIsNotTheProprietaryRail() {
-        // A third-party charger that speaks UFCS negotiates far less power, so it must
-        // not claim the violet SuperVOOC colour.
+        // A third-party charger that speaks UFCS reports a lower technology level, so
+        // it must not claim the violet SuperVOOC colour.
         assertEquals(
-            ChargeProtocol.FAST,
-            detect(chargeTech = 14, plugged = 1, wattage = 30)
-        )
-        assertEquals(
-            ChargeProtocol.FAST,
-            detect(chargeTech = 14, ppsMode = 4, plugged = 1, wattage = 20)
+            ChargeProtocol.UFCS,
+            detect(chargeTech = 14, chargeTechnology = 0, plugged = 1, wattage = 30)
         )
     }
 
@@ -57,7 +58,7 @@ class ChargeProtocolTest {
         // The regression: `pps_chg_mode` is non-zero while UFCS runs, so the charge
         // technology has to be checked before it.
         assertEquals(
-            ChargeProtocol.FAST,
+            ChargeProtocol.UFCS,
             detect(chargeTech = 14, ppsMode = 4, fastCharger = true, plugged = 1)
         )
     }
@@ -75,7 +76,8 @@ class ChargeProtocolTest {
         assertEquals(ChargeProtocol.SUPER_VOOC, detect(fastType = 4))
         // A fast charger without a named rail.
         assertEquals(ChargeProtocol.FAST, detect(fastCharger = true))
-        assertEquals(ChargeProtocol.FAST, detect(chargeTechnology = 3))
+        // The technology level of the original charger.
+        assertEquals(ChargeProtocol.SUPER_VOOC, detect(chargeTechnology = 3))
         // Plain USB charger.
         assertEquals(ChargeProtocol.SLOW, detect(plugged = 1))
     }
@@ -105,8 +107,12 @@ class ChargeProtocolTest {
         // A full battery draws no power, so the live reading drops to zero even on the
         // original charger — the charging state is what keeps the colour.
         assertEquals(
-            ChargeProtocol.FAST,
+            ChargeProtocol.UFCS,
             detect(chargeTech = 14, plugged = 1, wattage = 0, charging = true)
+        )
+        assertEquals(
+            ChargeProtocol.SUPER_VOOC,
+            detect(chargeTech = 14, chargeTechnology = 3, plugged = 1, wattage = 0, charging = true)
         )
     }
 }

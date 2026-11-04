@@ -33,11 +33,13 @@ data class IndicatorConfig(
     val numberScale: Int = 115,
     val autoNumber: Boolean = false,
     val numberThreshold: Int = 20,
-    // --- charging protocol palette (SuperVOOC / PPS / plain) ---
+    // --- charging protocol palette (original charger / UFCS / PPS / plain / unknown) ---
     val chargeColorAuto: Boolean = true,
     val voocColor: Int = 0xFF9C6BFF.toInt(),
-    val ppsColor: Int = 0xFF2ECC71.toInt(),
-    val slowChargeColor: Int = 0xFF3B82F6.toInt()
+    val ufcsColor: Int = 0xFF2ECC71.toInt(),
+    val ppsColor: Int = 0xFF3B82F6.toInt(),
+    val slowChargeColor: Int = 0xFF64748B.toInt(),
+    val unknownColor: Int = 0xFFF97316.toInt()
 ) {
     fun showsNumber(state: IndicatorState): Boolean =
         state.batteryPhase != BatteryPhase.CHARGING && state.batteryPhase != BatteryPhase.FULL && (showNumber ||
@@ -58,19 +60,19 @@ data class IndicatorConfig(
     }
 
     /**
-     * Colour used while charging. In automatic mode the firmware's charging protocol decides:
-     * the original OnePlus charger (SuperVOOC) uses the violet tone, PPS the green one and
-     * anything slower the blue one.
+     * Colour used while charging.
      *
-     * An unknown protocol falls back to the plain charging colour rather than to one of
-     * the protocol tones: the green belongs to PPS alone, and using it for a charger whose
-     * protocol could not be read would claim a protocol that is not in use.
+     * In automatic mode the detected protocol decides: the original OnePlus charger
+     * gets the violet tone, a third-party charger speaking the public UFCS standard the
+     * green one, a PPS charger the blue one, and a charger whose protocol could not be
+     * read at all the orange one.
      */
     fun chargeColor(state: IndicatorState): Int = when {
         !chargeColorAuto -> chargingColor
         state.chargeProtocol == ChargeProtocol.SUPER_VOOC -> voocColor
+        state.chargeProtocol == ChargeProtocol.UFCS -> ufcsColor
         state.chargeProtocol == ChargeProtocol.PPS -> ppsColor
-        state.chargeProtocol == ChargeProtocol.NONE -> chargingColor
+        state.chargeProtocol == ChargeProtocol.NONE -> unknownColor
         else -> slowChargeColor
     }
 
@@ -104,8 +106,10 @@ data class IndicatorConfig(
         putInt("numberThreshold", numberThreshold)
         putBoolean("chargeColorAuto", chargeColorAuto)
         putInt("voocColor", voocColor)
+        putInt("ufcsColor", ufcsColor)
         putInt("ppsColor", ppsColor)
         putInt("slowChargeColor", slowChargeColor)
+        putInt("unknownColor", unknownColor)
     }
 
     companion object {
@@ -151,8 +155,10 @@ data class IndicatorConfig(
                 numberThreshold = int("numberThreshold", 20).coerceIn(1, 100),
                 chargeColorAuto = bool("chargeColorAuto", true),
                 voocColor = int("voocColor", 0xFF9C6BFF.toInt()),
-                ppsColor = int("ppsColor", 0xFF2ECC71.toInt()),
-                slowChargeColor = int("slowChargeColor", 0xFF3B82F6.toInt())
+                ufcsColor = int("ufcsColor", 0xFF2ECC71.toInt()),
+                ppsColor = int("ppsColor", 0xFF3B82F6.toInt()),
+                slowChargeColor = int("slowChargeColor", 0xFF64748B.toInt()),
+                unknownColor = int("unknownColor", 0xFFF97316.toInt())
             )
         }
 
@@ -197,8 +203,10 @@ data class IndicatorConfig(
             numberThreshold = p.getInt("numberThreshold", 20).coerceIn(1, 100),
             chargeColorAuto = p.getBoolean("chargeColorAuto", true),
             voocColor = p.getInt("voocColor", 0xFF9C6BFF.toInt()) or 0xFF000000.toInt(),
-            ppsColor = p.getInt("ppsColor", 0xFF2ECC71.toInt()) or 0xFF000000.toInt(),
-            slowChargeColor = p.getInt("slowChargeColor", 0xFF3B82F6.toInt()) or 0xFF000000.toInt()
+            ufcsColor = p.getInt("ufcsColor", 0xFF2ECC71.toInt()) or 0xFF000000.toInt(),
+            ppsColor = p.getInt("ppsColor", 0xFF3B82F6.toInt()) or 0xFF000000.toInt(),
+            slowChargeColor = p.getInt("slowChargeColor", 0xFF64748B.toInt()) or 0xFF000000.toInt(),
+            unknownColor = p.getInt("unknownColor", 0xFFF97316.toInt()) or 0xFF000000.toInt()
         )
 
         // WCAG-based visibility floor for custom status colours.

@@ -588,13 +588,13 @@ class SystemStateSource(
         const val CHARGE_TECH_UFCS = 14
 
         /**
-         * The negotiated power from which on the charger counts as the proprietary
-         * SuperVOOC rail.
+         * The charger technology level from which on the charger is the proprietary
+         * OnePlus/OPPO one.
          *
-         * The original OnePlus charger reaches 100 W and above; third-party UFCS
-         * chargers top out well below that, which is what tells the two apart.
+         * The charging IC reports the capabilities of whatever is plugged in: the
+         * original charger reaches the VOOC level, a plain USB charger stays at 0.
          */
-        const val VOOC_WATTAGE = 60
+        const val CHARGER_TECHNOLOGY_VOOC = 3
 
         /** The `guardelfthermalcontrol` service that exposes the charger state. */
         const val SERVICE_GUARD_ELF_THERMAL = "guardelfthermalcontrol"
@@ -633,14 +633,17 @@ class SystemStateSource(
             wattage: Int,
             charging: Boolean
         ): ChargeProtocol {
-            // The proprietary VOOC rail: the original charger, at its full power.
-            if (wattage >= VOOC_WATTAGE) return ChargeProtocol.SUPER_VOOC
-            // A charger that is plugged in but not charging negotiates nothing and
-            // keeps its last protocol, so the charging state decides first. The power
-            // alone cannot: a full battery draws none, even on the original charger.
+            // The original OnePlus charger: the charging IC reports the proprietary
+            // VOOC capability. This is what tells it apart from a third-party charger
+            // that speaks the public UFCS standard — the original charger speaks both,
+            // and UFCS alone therefore says nothing about who plugged it in.
+            if (chargeTechnology >= CHARGER_TECHNOLOGY_VOOC) return ChargeProtocol.SUPER_VOOC
+            // A charger that is plugged in but not charging negotiates nothing and keeps
+            // its last protocol, so the charging state decides first. The power alone
+            // cannot: a full battery draws none, even on the original charger.
             if (!charging) return ChargeProtocol.NONE
-            // A UFCS charger that is not the original one: fast, but not SuperVOOC.
-            if (chargeTech == CHARGE_TECH_UFCS) return ChargeProtocol.FAST
+            // The public fast-charge standard, as a third-party charger speaks it.
+            if (chargeTech == CHARGE_TECH_UFCS) return ChargeProtocol.UFCS
             when (chargeTech) {
                 FAST_CHG_TYPE_VOOC -> return ChargeProtocol.SUPER_VOOC
                 FAST_CHG_TYPE_PPS -> return ChargeProtocol.PPS

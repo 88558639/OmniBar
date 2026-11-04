@@ -105,15 +105,17 @@ class RenderingTest {
         assertTrue("Bolt missing when full",
             boltInk(IndicatorState.demo.copy(battery = 100, batteryPhase = BatteryPhase.FULL)) > 50)
 
-        // The bolt uses the charging colour and never erases the host background.
+        // The bolt uses the colour of the detected protocol and never erases the host
+        // background. No protocol could be read here, so it is the unknown-protocol one.
+        val cfg = IndicatorConfig()
         val composed = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888)
         val c = Canvas(composed)
         c.drawColor(Color.rgb(21, 25, 27))
         IndicatorRenderer().draw(c, 300f, 300f,
-            IndicatorState.demo.copy(batteryPhase = BatteryPhase.CHARGING), IndicatorConfig(), Color.BLACK)
+            IndicatorState.demo.copy(batteryPhase = BatteryPhase.CHARGING), cfg, Color.BLACK)
         assertEquals("Background must not be erased", Color.rgb(21, 25, 27), composed.getPixel(15, 15))
         val solidBolt = (0 until 70).any { y ->
-            (240..295).any { x -> composed.getPixel(x, y) == 0xff1cb753.toInt() }
+            (240..295).any { x -> composed.getPixel(x, y) == cfg.unknownColor }
         }
         assertTrue("The bolt must use the charging colour", solidBolt)
     }

@@ -46,22 +46,29 @@ class BatteryColorTest {
     @Test fun chargingUsesChargingColorRegardlessOfLevel() {
         val cfg = IndicatorConfig()
         val s = IndicatorState.demo.copy(battery = 5, batteryPhase = BatteryPhase.CHARGING)
-        assertEquals(charging, cfg.batteryColor(s, Color.WHITE))
+        // No protocol could be read, so the colour says exactly that.
+        assertEquals(cfg.unknownColor, cfg.batteryColor(s, Color.WHITE))
     }
 
     @Test fun chargingColourFollowsTheDetectedProtocol() {
         val cfg = IndicatorConfig(chargeColorAuto = true)
         val charging = IndicatorState.demo.copy(battery = 50, batteryPhase = BatteryPhase.CHARGING)
+        // The original OnePlus charger.
         assertEquals(cfg.voocColor, cfg.batteryColor(
             charging.copy(chargeProtocol = ChargeProtocol.SUPER_VOOC), Color.WHITE))
+        // A third-party charger speaking the public UFCS standard.
+        assertEquals(cfg.ufcsColor, cfg.batteryColor(
+            charging.copy(chargeProtocol = ChargeProtocol.UFCS), Color.WHITE))
+        // A PPS charger.
         assertEquals(cfg.ppsColor, cfg.batteryColor(
             charging.copy(chargeProtocol = ChargeProtocol.PPS), Color.WHITE))
+        // A plain charger, and a fast charger of an unknown rail.
         assertEquals(cfg.slowChargeColor, cfg.batteryColor(
             charging.copy(chargeProtocol = ChargeProtocol.SLOW), Color.WHITE))
         assertEquals(cfg.slowChargeColor, cfg.batteryColor(
             charging.copy(chargeProtocol = ChargeProtocol.FAST), Color.WHITE))
-        // An unknown protocol must keep the legacy colour instead of guessing.
-        assertEquals(cfg.chargingColor, cfg.batteryColor(charging, Color.WHITE))
+        // A protocol that could not be read at all.
+        assertEquals(cfg.unknownColor, cfg.batteryColor(charging, Color.WHITE))
         // Manual mode always wins over the protocol.
         val manual = cfg.copy(chargeColorAuto = false)
         assertEquals(manual.chargingColor, manual.batteryColor(

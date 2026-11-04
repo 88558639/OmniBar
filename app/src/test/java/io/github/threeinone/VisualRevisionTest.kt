@@ -151,8 +151,8 @@ class VisualRevisionTest {
             val numberPixels = (18..48).flatMap { y -> (115..185).map { x -> b.getPixel(x, y) } }
             assertEquals(0, numberPixels.count { it == tint })
             assertTrue(b.sameAs(render(state, IndicatorConfig(), tint)))
-            assertTrue("Arc must retain charging green", (0 until 300).any { y ->
-                (0 until 300).any { x -> b.getPixel(x, y) == 0xff1cb753.toInt() }
+            assertTrue("Arc must retain the charging colour", (0 until 300).any { y ->
+                (0 until 300).any { x -> b.getPixel(x, y) == IndicatorConfig().unknownColor }
             })
         }
     }
