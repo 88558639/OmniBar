@@ -25,10 +25,11 @@ class ChargeProtocolTest {
         voltageMv: Int = 0,
         currentMa: Int = 0,
         wattage: Int = 20,
+        chargerVoltageMv: Int = 9000,
         charging: Boolean = true
     ) = SystemStateSource.detectProtocol(
         chargeTech, fastType, ppsMode, chargeTechnology, plugged, fastCharger,
-        voltageMv, currentMa, wattage, charging
+        voltageMv, currentMa, wattage, chargerVoltageMv, charging
     )
 
     @Test fun originalChargerIsRecognisedByItsTechnologyLevel() {
@@ -50,7 +51,20 @@ class ChargeProtocolTest {
         // it must not claim the violet SuperVOOC colour.
         assertEquals(
             ChargeProtocol.UFCS,
-            detect(chargeTech = 14, chargeTechnology = 0, plugged = 1, wattage = 30)
+            detect(chargeTech = 14, chargeTechnology = 0, plugged = 1, wattage = 30,
+                voltageMv = 9000, chargerVoltageMv = 9000)
+        )
+    }
+
+    @Test fun aPlainUsbPortIsNotAFastCharger() {
+        // The firmware reports the UFCS charge type even for a plain USB port — a power
+        // strip's port for instance. Only the voltage the charger actually delivers
+        // tells them apart: a fast charger pushes the rail to 9 V, a plain port stays
+        // at 5 V. A plain port is slow charging, not an unknown protocol.
+        assertEquals(
+            ChargeProtocol.SLOW,
+            detect(chargeTech = 14, chargeTechnology = 0, plugged = 1, wattage = 0,
+                voltageMv = 5000, chargerVoltageMv = 4648)
         )
     }
 
@@ -59,7 +73,8 @@ class ChargeProtocolTest {
         // technology has to be checked before it.
         assertEquals(
             ChargeProtocol.UFCS,
-            detect(chargeTech = 14, ppsMode = 4, fastCharger = true, plugged = 1)
+            detect(chargeTech = 14, ppsMode = 4, fastCharger = true, plugged = 1,
+                voltageMv = 9000, chargerVoltageMv = 9000)
         )
     }
 
@@ -85,7 +100,8 @@ class ChargeProtocolTest {
     @Test fun negotiatedVoltageStillAllowsARoughGuess() {
         // 11 V is the proprietary SuperVOOC rail, PPS tops out around 9 V.
         assertEquals(ChargeProtocol.SUPER_VOOC, detect(voltageMv = 11000))
-        assertEquals(ChargeProtocol.PPS, detect(voltageMv = 9000, currentMa = 5000))
+        assertEquals(ChargeProtocol.PPS, detect(voltageMv = 9000, currentMa = 5000, chargeTech = 4,
+            chargerVoltageMv = 9000))
         assertEquals(ChargeProtocol.FAST, detect(voltageMv = 9000))
         assertEquals(ChargeProtocol.SLOW, detect(voltageMv = 5000))
     }
@@ -108,7 +124,8 @@ class ChargeProtocolTest {
         // original charger — the charging state is what keeps the colour.
         assertEquals(
             ChargeProtocol.UFCS,
-            detect(chargeTech = 14, plugged = 1, wattage = 0, charging = true)
+            detect(chargeTech = 14, plugged = 1, wattage = 0, voltageMv = 9000,
+                chargerVoltageMv = 9000, charging = true)
         )
         assertEquals(
             ChargeProtocol.SUPER_VOOC,

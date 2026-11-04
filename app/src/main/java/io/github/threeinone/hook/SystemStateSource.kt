@@ -81,6 +81,9 @@ class SystemStateSource(
      */
     private var batteryFastChgType = 0
 
+    /** The charger technology level the charging IC reports. */
+    private var chargerTechnologyLevel = 0
+
     /**
      * The highest power this charger session negotiated.
      *
@@ -131,7 +134,11 @@ class SystemStateSource(
             oplusPpsMode = intent.readInt("pps_chg_mode", oplusPpsMode)
             oplusChargeTechnology = intent.readInt("chargertechnology", oplusChargeTechnology)
             oplusChargePlugged = intent.readInt("chargeplugged", oplusChargePlugged)
-            oplusChargerVoltageMv = intent.readInt("chargervoltage", oplusChargerVoltageMv)
+            // Only the full battery broadcast carries the voltage; the short one omits it
+            // and would otherwise keep a stale reading.
+            if (intent.extras?.containsKey("chargervoltage") == true) {
+                oplusChargerVoltageMv = intent.readInt("chargervoltage", 0)
+            }
             // `chargewattage` is deliberately not read here: the broadcast extra lags
             // behind when the charger is unplugged, while the charger service reports
             // the current negotiation.
@@ -162,7 +169,8 @@ class SystemStateSource(
                 "3IN1: charge protocol=$protocol negotiated=${negotiatedVoltageMv}mV/${negotiatedCurrentMa}mA " +
                     "oplus=[fastType=$oplusFastType ppsMode=$oplusPpsMode tech=$oplusChargeTechnology " +
                     "plugged=$oplusChargePlugged fast=$oplusFastCharger v=${oplusChargerVoltageMv}mV w=${oplusWatts}] " +
-                    "battery=[usbFastChgType=$batteryFastChgType]"
+                    "battery=[usbFastChgType=$batteryFastChgType chgTech=$chargerTechnologyLevel " +
+                    "chgV=${oplusChargerVoltageMv}mV]"
             )
         }
         current = current.copy(chargeProtocol = protocol, chargeWatts = oplusWatts)
@@ -173,12 +181,13 @@ class SystemStateSource(
         chargeTech = batteryFastChgType,
         fastType = oplusFastType,
         ppsMode = oplusPpsMode,
-        chargeTechnology = oplusChargeTechnology,
+        chargeTechnology = maxOf(chargerTechnologyLevel, oplusChargeTechnology),
         plugged = oplusChargePlugged,
         fastCharger = oplusFastCharger,
         voltageMv = negotiatedVoltageMv,
         currentMa = negotiatedCurrentMa,
         wattage = peakWatts,
+        chargerVoltageMv = oplusChargerVoltageMv,
         charging = current.batteryPhase in setOf(BatteryPhase.CHARGING, BatteryPhase.FULL)
     )
 
@@ -198,6 +207,8 @@ class SystemStateSource(
             ?.let { if (it >= 0) batteryFastChgType = it }
         // The negotiated power is what tells an original OnePlus charger from a
         // third-party one that happens to speak UFCS as well.
+        runCatching { queryGuardElf(TRANSACTION_GET_CHARGER_TECHNOLOGY) }.getOrNull()
+            ?.let { if (it >= 0) chargerTechnologyLevel = it }
         runCatching { queryGuardElf(TRANSACTION_GET_BATT_PPS_CHG_POWER) }.getOrNull()
             ?.let {
                 if (it >= 0) {
@@ -596,6 +607,15 @@ class SystemStateSource(
          */
         const val CHARGER_TECHNOLOGY_VOOC = 3
 
+        /**
+         * The negotiated voltage from which on the charger counts as a fast charger.
+         *
+         * The USB baseline is 5 V; UFCS and PPS push the rail up to 9 V and beyond.
+         * A plain USB port — even one in a power strip — negotiates 5 V only, even
+         * though the firmware reports the UFCS charge type for it.
+         */
+        const val FAST_CHARGE_VOLTAGE_MV = 9000
+
         /** The `guardelfthermalcontrol` service that exposes the charger state. */
         const val SERVICE_GUARD_ELF_THERMAL = "guardelfthermalcontrol"
 
@@ -607,6 +627,9 @@ class SystemStateSource(
 
         /** Transaction code of `getBattPPSChgPower()`, the negotiated power in watts. */
         const val TRANSACTION_GET_BATT_PPS_CHG_POWER = 22
+
+        /** Transaction code of `getChargerTechnology()`, the charger capability level. */
+        const val TRANSACTION_GET_CHARGER_TECHNOLOGY = 28
 
         /**
          * Maps the charging telemetry onto a protocol.
@@ -631,6 +654,7 @@ class SystemStateSource(
             voltageMv: Int,
             currentMa: Int,
             wattage: Int,
+            chargerVoltageMv: Int,
             charging: Boolean
         ): ChargeProtocol {
             // The original OnePlus charger: the charging IC reports the proprietary
@@ -642,11 +666,15 @@ class SystemStateSource(
             // its last protocol, so the charging state decides first. The power alone
             // cannot: a full battery draws none, even on the original charger.
             if (!charging) return ChargeProtocol.NONE
-            // The public fast-charge standard, as a third-party charger speaks it.
-            if (chargeTech == CHARGE_TECH_UFCS) return ChargeProtocol.UFCS
-            when (chargeTech) {
-                FAST_CHG_TYPE_VOOC -> return ChargeProtocol.SUPER_VOOC
-                FAST_CHG_TYPE_PPS -> return ChargeProtocol.PPS
+            // The charge type alone does not identify a fast charger: the firmware
+            // reports UFCS for a plain USB port as well — a power strip's port for
+            // instance. What separates them is the voltage the charger actually
+            // delivers: a fast charger pushes the rail to 9 V and beyond, a plain USB
+            // port stays at 5 V.
+            if (chargerVoltageMv >= FAST_CHARGE_VOLTAGE_MV) {
+                if (chargeTech == FAST_CHG_TYPE_PPS) return ChargeProtocol.PPS
+                if (chargeTech == CHARGE_TECH_UFCS) return ChargeProtocol.UFCS
+                if (chargeTech == FAST_CHG_TYPE_VOOC) return ChargeProtocol.SUPER_VOOC
             }
             if (fastType > 0) return ChargeProtocol.SUPER_VOOC
             // The charge technology is unknown but the firmware reports a proprietary

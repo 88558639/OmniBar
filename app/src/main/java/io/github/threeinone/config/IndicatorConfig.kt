@@ -122,8 +122,14 @@ data class IndicatorConfig(
         const val PROBE_TIME = "probeTime"
         const val PROBE_REVISION = "probeRevision"
 
-        /** Rebuild from the cross-process bundle; falls back to defaults when unavailable. */
+        /**
+         * Rebuild from the cross-process bundle; falls back to defaults when unavailable.
+         *
+         * A bundle written before the palette was split into four protocol tones is
+         * moved over to the new one, the same way the preferences are.
+         */
         fun fromBundle(b: android.os.Bundle?): IndicatorConfig {
+            val palette = paletteFromBundle(b)
             fun bool(key: String, def: Boolean) = b?.let { if (it.containsKey(key)) it.getBoolean(key) else def } ?: def
             fun int(key: String, def: Int) = b?.let { if (it.containsKey(key)) it.getInt(key) else def } ?: def
             return IndicatorConfig(
@@ -155,10 +161,10 @@ data class IndicatorConfig(
                 numberThreshold = int("numberThreshold", 20).coerceIn(1, 100),
                 chargeColorAuto = bool("chargeColorAuto", true),
                 voocColor = int("voocColor", 0xFF9C6BFF.toInt()),
-                ufcsColor = int("ufcsColor", 0xFF2ECC71.toInt()),
-                ppsColor = int("ppsColor", 0xFF3B82F6.toInt()),
-                slowChargeColor = int("slowChargeColor", 0xFF64748B.toInt()),
-                unknownColor = int("unknownColor", 0xFFF97316.toInt())
+                ufcsColor = palette.ufcsColor,
+                ppsColor = palette.ppsColor,
+                slowChargeColor = palette.slowChargeColor,
+                unknownColor = palette.unknownColor
             )
         }
 
@@ -175,7 +181,93 @@ data class IndicatorConfig(
             if (enabled) editor.putBoolean(other, false)
             editor.apply()
         }
-        fun read(p: SharedPreferences) = IndicatorConfig(
+        /**
+         * The colour of the plain charging slot before the palette was split into four
+         * protocol tones. A setting that still holds it was never customised.
+         */
+        private const val LEGACY_PPS_COLOR = 0xFF2ECC71.toInt()
+
+        /**
+         * The colours the slow-charging slot held before the palette was split into four
+         * protocol tones. A setting that still holds one of them was never customised.
+         */
+        private val LEGACY_SLOW_COLORS = setOf(0xFFFFB300.toInt(), 0xFF3B82F6.toInt())
+
+        /**
+         * Reads the settings and moves a palette that predates the four protocol tones
+         * over to the new one.
+         *
+         * The tones changed meaning: the green that belonged to PPS is now the colour of
+         * a third-party UFCS charger, and the blue that belonged to slow charging is now
+         * the colour of a PPS charger. A value that still equals the old default was
+         * never customised, so it can move along; a value the user picked stays where it
+         * is.
+         */
+        private fun readPalette(p: SharedPreferences): Palette {
+            // The new slots are absent from a palette that predates them.
+            val migrated = !p.contains("ufcsColor") || !p.contains("unknownColor")
+            val legacyPps = p.getInt("ppsColor", LEGACY_PPS_COLOR) or 0xFF000000.toInt()
+            val legacySlow = p.getInt("slowChargeColor", 0xFF3B82F6.toInt()) or 0xFF000000.toInt()
+            return Palette(
+                // The green that belonged to PPS is now the tone of a third-party UFCS
+                // charger, and the blue that belonged to slow charging the tone of PPS.
+                ufcsColor = if (migrated) legacyPps else p.getInt("ufcsColor", LEGACY_PPS_COLOR) or 0xFF000000.toInt(),
+                // PPS is the blue tone now; the old slow-charging colour moves into that
+                // slot only when it was the blue default, otherwise the user picked it.
+                ppsColor = if (migrated && legacySlow in LEGACY_SLOW_COLORS) {
+                    0xFF3B82F6.toInt()
+                } else {
+                    p.getInt("ppsColor", 0xFF3B82F6.toInt()) or 0xFF000000.toInt()
+                },
+                // Slow charging gets a neutral grey of its own; a colour the user picked
+                // for it stays.
+                slowChargeColor = if (migrated && legacySlow in LEGACY_SLOW_COLORS) {
+                    0xFF64748B.toInt()
+                } else {
+                    p.getInt("slowChargeColor", 0xFF64748B.toInt()) or 0xFF000000.toInt()
+                },
+                unknownColor = p.getInt("unknownColor", 0xFFF97316.toInt()) or 0xFF000000.toInt()
+            )
+        }
+
+        /** The four charging tones, read from a cross-process bundle. */
+        private fun paletteFromBundle(b: android.os.Bundle?): Palette {
+            fun int(key: String, def: Int) = b?.let { if (it.containsKey(key)) it.getInt(key) else def } ?: def
+            val migrated = b?.containsKey("ufcsColor") != true || b.containsKey("unknownColor") != true
+            val legacyPps = int("ppsColor", LEGACY_PPS_COLOR) or 0xFF000000.toInt()
+            val legacySlow = int("slowChargeColor", 0xFF3B82F6.toInt()) or 0xFF000000.toInt()
+            return Palette(
+                ufcsColor = if (migrated) legacyPps else int("ufcsColor", LEGACY_PPS_COLOR) or 0xFF000000.toInt(),
+                // PPS is the blue tone now; the old slow-charging colour moves into that
+                // slot only when it was the blue default, otherwise the user picked it.
+                ppsColor = if (migrated && legacySlow in LEGACY_SLOW_COLORS) {
+                    0xFF3B82F6.toInt()
+                } else {
+                    int("ppsColor", 0xFF3B82F6.toInt()) or 0xFF000000.toInt()
+                },
+                slowChargeColor = if (migrated && legacySlow in LEGACY_SLOW_COLORS) {
+                    0xFF64748B.toInt()
+                } else {
+                    int("slowChargeColor", 0xFF64748B.toInt()) or 0xFF000000.toInt()
+                },
+                unknownColor = int("unknownColor", 0xFFF97316.toInt()) or 0xFF000000.toInt()
+            )
+        }
+
+        /** The four charging tones, read from the settings. */
+        private data class Palette(
+            val ufcsColor: Int,
+            val ppsColor: Int,
+            val slowChargeColor: Int,
+            val unknownColor: Int
+        )
+
+        fun read(p: SharedPreferences): IndicatorConfig {
+            val palette = readPalette(p)
+            return read(p, palette)
+        }
+
+        private fun read(p: SharedPreferences, palette: Palette) = IndicatorConfig(
             enabled = p.getBoolean("enabled", false), lockscreen = p.getBoolean("lockscreen", true),
             size = p.getInt("size", 22).coerceIn(16, 32),
             wifiScale = p.getInt("wifiScale", 115).coerceIn(70, 150),
@@ -203,10 +295,10 @@ data class IndicatorConfig(
             numberThreshold = p.getInt("numberThreshold", 20).coerceIn(1, 100),
             chargeColorAuto = p.getBoolean("chargeColorAuto", true),
             voocColor = p.getInt("voocColor", 0xFF9C6BFF.toInt()) or 0xFF000000.toInt(),
-            ufcsColor = p.getInt("ufcsColor", 0xFF2ECC71.toInt()) or 0xFF000000.toInt(),
-            ppsColor = p.getInt("ppsColor", 0xFF3B82F6.toInt()) or 0xFF000000.toInt(),
-            slowChargeColor = p.getInt("slowChargeColor", 0xFF64748B.toInt()) or 0xFF000000.toInt(),
-            unknownColor = p.getInt("unknownColor", 0xFFF97316.toInt()) or 0xFF000000.toInt()
+            ufcsColor = palette.ufcsColor,
+            ppsColor = palette.ppsColor,
+            slowChargeColor = palette.slowChargeColor,
+            unknownColor = palette.unknownColor
         )
 
         // WCAG-based visibility floor for custom status colours.

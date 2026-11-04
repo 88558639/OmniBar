@@ -113,6 +113,32 @@ class BatteryColorTest {
         assertTrue("Near-reference grey must be lifted off the background", lifted != nearInvisible)
     }
 
+    @Test fun anOldPaletteMovesOverToTheProtocolTones() {
+        // A palette from before the four protocol tones: the green belonged to PPS and
+        // the blue to slow charging. The green is now the tone of a third-party UFCS
+        // charger and the blue the tone of PPS.
+        val old = android.os.Bundle().apply {
+            putInt("ppsColor", 0xFF2ECC71.toInt())
+            putInt("slowChargeColor", 0xFF3B82F6.toInt())
+        }
+        val migrated = IndicatorConfig.fromBundle(old)
+        assertEquals(0xFF2ECC71.toInt(), migrated.ufcsColor)
+        assertEquals(0xFF3B82F6.toInt(), migrated.ppsColor)
+        assertEquals(0xFF64748B.toInt(), migrated.slowChargeColor)
+        assertEquals(0xFFF97316.toInt(), migrated.unknownColor)
+    }
+
+    @Test fun aCustomisedOldPaletteIsLeftAlone() {
+        // A colour the user picked does not move to another slot.
+        val old = android.os.Bundle().apply {
+            putInt("ppsColor", 0xFF123456.toInt())
+            putInt("slowChargeColor", 0xFF654321.toInt())
+        }
+        val migrated = IndicatorConfig.fromBundle(old)
+        assertEquals(0xFF123456.toInt(), migrated.ufcsColor)
+        assertEquals(0xFF654321.toInt(), migrated.slowChargeColor)
+    }
+
     @Test fun vpnShieldDrawnWhenEnabledAndActive() {
         val on = render(IndicatorState.demo.copy(vpn = true), IndicatorConfig(showVpn = true))
         val off = render(IndicatorState.demo.copy(vpn = true), IndicatorConfig(showVpn = false))
