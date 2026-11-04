@@ -94,8 +94,11 @@ class ChargingMarkerTest {
             (0..299).count { x -> full.getPixel(x, y) == 0xff1cb753.toInt() }
         }
         assertTrue("Full charge must paint the number in the charging colour", greenAtTop > 500)
-        // "100" is three separate digits.
-        assertEquals(3, inkClusters(full, 0, 244, 0, 40).size)
+        // "100" is three separate digits. The charging bolt lives further to the right
+        // (it starts around x = 244 px), so the scan stops before it.
+        assertEquals(3, inkClusters(full, 0, 240, 0, 40).size)
+        // The bolt itself is drawn in the same band, as a single glyph.
+        assertEquals(1, inkClusters(full, 242, 299, 0, 40).size)
 
         // The bottom arc is complete, from 135° (lower left) to 45° (lower right).
         for (deg in 135 downTo 45 step 5) {

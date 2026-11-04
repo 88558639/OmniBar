@@ -78,15 +78,18 @@ class IndicatorRenderer {
     private val bounds = RectF()
     private val path = Path()
 
-    fun draw(canvas: Canvas, width: Float, height: Float, state: IndicatorState, config: IndicatorConfig, tint: Int) {
+    fun draw(
+        canvas: Canvas, width: Float, height: Float, state: IndicatorState, config: IndicatorConfig,
+        tint: Int, extraShiftPx: Float = 0f
+    ) {
         if (width <= 0 || height <= 0) return
         val scale = min(width / 100f, height / 100f)
         val save = canvas.save()
         try {
-            // Shift the whole indicator up a touch so the Wi-Fi fan, the 5G label and the
-            // battery number sit higher inside the status bar instead of drifting down.
-            val contentShiftY = 8f * scale
-            canvas.translate((width - 100 * scale) / 2, (height - 100 * scale) / 2 - contentShiftY)
+            // The caller lifts the whole indicator inside the status bar: the Wi-Fi fan,
+            // the network label, the battery number and the charging bolt would otherwise
+            // drift towards the bottom of the bar.
+            canvas.translate((width - 100 * scale) / 2, (height - 100 * scale) / 2 - extraShiftPx)
             canvas.scale(scale, scale)
             val battery = config.batteryColor(state, tint)
 
