@@ -199,12 +199,30 @@ class VisualRevisionTest {
         assertEquals(250, IndicatorConfig.read(prefs).textScale)
         for (label in listOf("2G", "3G", "4G", "5G")) {
             val state = IndicatorState.demo.copy(wifi = WifiPhase.OFF, networkType = label)
-            fun ink(b: Bitmap) = (120..240).sumOf { y ->
-                (65..235).count { x -> Color.alpha(b.getPixel(x, y)) > 128 }
+            // The bounding box of the glyphs, measured between the percentage above and
+            // the battery arc below. A fixed ink window would clip a wider label and
+            // hide exactly the clamping this test is about.
+            fun box(b: Bitmap): Pair<Int, Int> {
+                var minX = Int.MAX_VALUE
+                var maxX = -1
+                var minY = Int.MAX_VALUE
+                var maxY = -1
+                for (y in 100..230) for (x in 0 until 300) {
+                    if (Color.alpha(b.getPixel(x, y)) > 128) {
+                        if (x < minX) minX = x
+                        if (x > maxX) maxX = x
+                        if (y < minY) minY = y
+                        if (y > maxY) maxY = y
+                    }
+                }
+                return (maxX - minX) to (maxY - minY)
             }
-            val normal = ink(render(state, IndicatorConfig(textScale = 150)))
-            val large = ink(render(state, IndicatorConfig(textScale = 250)))
-            assertTrue("$label must grow, not be silently width-clamped", large > normal * 2)
+            val normal = box(render(state, IndicatorConfig(textScale = 150)))
+            val large = box(render(state, IndicatorConfig(textScale = 250)))
+            assertTrue("$label must grow in width, not be silently width-clamped",
+                large.first > normal.first * 12 / 10)
+            assertTrue("$label must grow in height too",
+                large.second > normal.second * 12 / 10)
         }
     }
 

@@ -70,10 +70,10 @@ class IndicatorRenderer {
          * takes the place of the Wi-Fi fan, so it is sized to match that fan: at the
          * default text scale a bold two-character label is about as wide as the fan.
          */
-        const val NETWORK_LABEL_BASE_SIZE = 21f
+        const val NETWORK_LABEL_BASE_SIZE = 26f
 
         /** Largest the label may become — beyond that it would reach the signal dots. */
-        const val NETWORK_LABEL_MAX_SIZE = 52f
+        const val NETWORK_LABEL_MAX_SIZE = 60f
 
         /** Smallest the label may become. */
         const val NETWORK_LABEL_MIN_SIZE = 12f
@@ -86,8 +86,13 @@ class IndicatorRenderer {
          */
         const val NETWORK_LABEL_CENTER = 54f
 
-        /** Widest the label may get before it would touch the signal dots. */
-        const val NETWORK_LABEL_MAX_WIDTH = 60f
+        /**
+         * Widest the label may get before it would touch the signal dots.
+         *
+         * The inner edge of the dot columns sits at x = 88 units, so the label may span
+         * 72 units and still keep a visible gap.
+         */
+        const val NETWORK_LABEL_MAX_WIDTH = 72f
 
         /** The "--" placeholder is drawn smaller than a real network type. */
         const val PLACEHOLDER_SIZE_RATIO = 0.62f
