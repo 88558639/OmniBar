@@ -4,6 +4,7 @@ import android.graphics.*
 import io.github.threeinone.config.IndicatorConfig
 import io.github.threeinone.model.*
 import kotlin.math.min
+import kotlin.math.sin
 
 /**
  * A normalized 100-unit drawing shared by the real status bar and preview.
@@ -98,26 +99,44 @@ class IndicatorRenderer {
         const val PLACEHOLDER_SIZE_RATIO = 0.62f
 
         /**
-         * Size of the charging bolt once it became a badge on the percentage.
+         * Largest the charging bolt may get.
          *
-         * The glyph is 14 x 21 units; a badge has to stay readable without competing
-         * with the number itself.
+         * The badge lives in the top corner of the indicator, so the corner itself is
+         * what limits its size: the signal dot column below and the digits to the side.
          */
-        const val BOLT_SCALE = 0.8f
+        const val BOLT_MAX_SCALE = 1.3f
 
-        /** Distance between the percentage and the badge on its right. */
-        const val BOLT_GAP = 1f
+        /** Width of the bolt glyph. */
+        const val BOLT_WIDTH = 17f
 
-        /**
-         * The badge may never reach the signal dots: the first dot of the right column
-         * sits at x = 93 units and its top edge at y = 39 units.
-         */
-        const val BOLT_MAX_RIGHT = 92f
+        /** Height of the bolt glyph. */
+        const val BOLT_HEIGHT = 21f
+
+        /** Gap between the percentage and the badge next to it. */
+        const val BOLT_GAP = 1.2f
+
+        /** The badge hangs flush against this edge of the 100-unit box. */
+        const val BOLT_EDGE_RIGHT = 99.5f
+
+        /** …and against this one, when it hangs on the left of the digits. */
+        const val BOLT_EDGE_LEFT = 0.5f
+
+        /** Top edge of the badge — it sits on the top line of the indicator. */
+        const val BOLT_TOP = 0f
+
+        /** How far the badge rises above the top of the digits. */
+        const val BOLT_RISE = 3f
+
+        /** The badge may not reach the signal dots — it stays this far above them. */
+        const val BOLT_DOT_CLEARANCE = 1.2f
     }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bounds = RectF()
     private val path = Path()
+
+    /** Left edge of the percentage glyphs. */
+    private var numberLeft = 0f
 
     /** Right edge of the percentage glyphs — the bolt is anchored to it. */
     private var numberRight = 0f
@@ -140,9 +159,19 @@ class IndicatorRenderer {
             canvas.scale(scale, scale)
             val battery = config.batteryColor(state, tint)
 
+            val spread = config.dotSpacing / 100f
+            val dotRadius = SIGNAL_DOT_RADIUS * config.dotScale / 100f
+            val ringRadius = ringRadius(dotRadius, spread, config)
+
             drawNumber(canvas, state, config, tint)
             if (state.batteryPhase == BatteryPhase.CHARGING || state.batteryPhase == BatteryPhase.FULL) {
-                drawBolt(canvas, battery)
+                // Top edge of the highest signal dot: the badge must stay above it.
+                val dotTop = RING_CENTER_Y +
+                    ringRadius * sin(Math.toRadians(-33.0 * spread)).toFloat() - dotRadius
+                // The VPN shield takes the top right corner in the mirrored layout, so the
+                // badge moves to the other side there.
+                val onLeft = config.swap && config.showVpn && state.vpn
+                drawBolt(canvas, battery, dotTop, onLeft)
             }
             if (config.showVpn && state.vpn) drawVpn(canvas, tint, config.swap)
 
@@ -155,10 +184,6 @@ class IndicatorRenderer {
             } else {
                 drawNetworkLabel(canvas, "--", config, tint, PLACEHOLDER_SIZE_RATIO)
             }
-
-            val spread = config.dotSpacing / 100f
-            val dotRadius = SIGNAL_DOT_RADIUS * config.dotScale / 100f
-            val ringRadius = ringRadius(dotRadius, spread, config)
 
             drawSignalDots(canvas, state, config, tint, spread, dotRadius, ringRadius)
             drawBatteryArc(canvas, state, config, tint, battery, ringRadius)
@@ -193,19 +218,24 @@ class IndicatorRenderer {
         // A three-digit reading is too wide for the gap between the signal dots: squeeze it
         // horizontally instead of shrinking it, so the height still follows the slider.
         val width = paint.measureText(value)
-        if (width > NUMBER_MAX_WIDTH) {
+        val squeeze = if (width > NUMBER_MAX_WIDTH) NUMBER_MAX_WIDTH / width else 1f
+        if (squeeze < 1f) {
             val save = canvas.save()
             canvas.translate(50f, 0f)
-            canvas.scale(NUMBER_MAX_WIDTH / width, 1f)
+            canvas.scale(squeeze, 1f)
             canvas.drawText(value, 0f, baseline, paint)
             canvas.restoreToCount(save)
         } else {
             canvas.drawText(value, 50f, baseline, paint)
         }
-        // Remember where the glyphs end: the charging bolt hangs on that corner as a badge.
+        // Remember where the ink ends: the charging bolt hangs on that corner as a badge.
+        // getTextBounds() reports the box relative to the drawing origin, while the text is
+        // centred on x = 50 — and squeezed about that point when it is too wide.
         val glyphs = Rect()
         paint.getTextBounds(value, 0, value.length, glyphs)
-        numberRight = 50f + min(width, NUMBER_MAX_WIDTH) / 2f
+        val origin = 50f - width * squeeze / 2f
+        numberLeft = origin + glyphs.left * squeeze
+        numberRight = origin + glyphs.right * squeeze
         numberTop = baseline + glyphs.top
     }
 
@@ -397,26 +427,43 @@ class IndicatorRenderer {
     // ------------------------------------------------------------------ badges
 
     /**
-     * The charging bolt, drawn as a badge on the top right corner of the percentage.
+     * The charging bolt, drawn as a badge in the top corner of the indicator.
      *
-     * Parked in the fixed corner of the 100-unit box, the tip of the bolt used to land
-     * right on top of the first signal dot. Anchored to the number instead, it stays
-     * clear of the dots and reads as "this percentage is charging".
+     * Parked in the middle of the number it used to be swallowed by the digits — while
+     * charging both are painted in the same charging colour, so an overlap smears them
+     * into one blob. As a badge it stands next to the percentage instead: it touches
+     * neither the digits nor the signal dots.
+     *
+     * The badge is pinned to the corner, so it keeps its place while the percentage
+     * changes width. It shrinks only when a wide reading such as "100" would push it
+     * into the digits.
      */
-    private fun drawBolt(canvas: Canvas, color: Int) {
+    private fun drawBolt(canvas: Canvas, color: Int, dotTop: Float, onLeft: Boolean) {
         val save = canvas.save()
         try {
-            val s = BOLT_SCALE
-            val badgeWidth = 14f * s
-            val badgeHeight = 21f * s
-            // Right of the number, but never into the signal dots.
-            var left = numberRight + BOLT_GAP
-            if (left + badgeWidth > BOLT_MAX_RIGHT) left = BOLT_MAX_RIGHT - badgeWidth
-            canvas.translate(left - 44f * s, numberTop)
-            canvas.scale(s, s)
+            // The badge hangs from the top line of the indicator.
+            val top = maxOf(BOLT_TOP, numberTop - BOLT_RISE)
+            // Vertical room: down to the top of the first signal dot.
+            val heightRoom = dotTop - BOLT_DOT_CLEARANCE - top
+            // Horizontal room: between the digits and the corner the badge is pinned to.
+            val widthRoom = if (onLeft) numberLeft - BOLT_GAP - BOLT_EDGE_LEFT
+                            else BOLT_EDGE_RIGHT - numberRight - BOLT_GAP
+            var s = min(BOLT_MAX_SCALE, min(heightRoom / BOLT_HEIGHT, widthRoom / BOLT_WIDTH))
+            s = s.coerceAtLeast(0.25f)
+            val badgeWidth = BOLT_WIDTH * s
+            if (onLeft) {
+                // On the left the badge is mirrored, so its tip still points outwards.
+                canvas.translate(BOLT_EDGE_LEFT + badgeWidth, top)
+                canvas.scale(-s, s)
+            } else {
+                canvas.translate(BOLT_EDGE_RIGHT - badgeWidth, top)
+                canvas.scale(s, s)
+            }
             path.reset()
-            path.moveTo(53f, 0f); path.lineTo(44f, 12f); path.lineTo(50f, 12f)
-            path.lineTo(47f, 21f); path.lineTo(58f, 8f); path.lineTo(52f, 8f); path.close()
+            // A beefier bolt than the original glyph: it has to read as a charging mark
+            // at status bar size.
+            path.moveTo(13f, 0f); path.lineTo(0f, 13f); path.lineTo(7f, 13f)
+            path.lineTo(4f, 21f); path.lineTo(17f, 8f); path.lineTo(10f, 8f); path.close()
             fill(color); canvas.drawPath(path, paint)
         } finally { canvas.restoreToCount(save) }
     }

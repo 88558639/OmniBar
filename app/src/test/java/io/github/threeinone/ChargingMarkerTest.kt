@@ -94,17 +94,20 @@ class ChargingMarkerTest {
             (0..299).count { x -> full.getPixel(x, y) == 0xff1cb753.toInt() }
         }
         assertTrue("Full charge must paint the number in the charging colour", greenAtTop > 500)
-        // "100" is three separate digits. The charging bolt lives further to the right
-        // (it starts around x = 244 px), so the scan stops before it.
-        assertEquals(3, inkClusters(full, 0, 240, 0, 40).size)
-        // The bolt itself is drawn in the same band, as a single glyph.
-        assertEquals(1, inkClusters(full, 242, 299, 0, 40).size)
-
-        // The bolt is a badge on the percentage: it must sit right of the digits and
-        // stay clear of the first signal dot of the right column (x = 93 units).
-        val bolt = inkClusters(full, 200, 299, 0, 40).last()
-        assertTrue("The bolt must start right of the percentage", bolt.first > 240)
-        assertTrue("The bolt must not reach the signal dots", bolt.last < 279)
+        // "100" is three separate digits. The charging bolt is a badge in the top
+        // corner, so the scan of the digits stops before it.
+        assertEquals(3, inkClusters(full, 0, 195, 0, 40).size)
+        // The badge is pinned to the right edge of the indicator and hangs above the
+        // signal dots: the last digit ends at x = 78 units (234 px), the badge starts
+        // after it and reaches the edge (x = 99.5 units = 298 px).
+        val topBand = inkClusters(full, 0, 299, 0, 40)
+        assertEquals("The badge must be a cluster of its own", 4, topBand.size)
+        assertTrue("The badge must not touch the digits", topBand.last().first > 240)
+        assertTrue("The badge must reach the edge of the indicator", topBand.last().last > 290)
+        // …and it must stop above the signal dots (top edge y = 23.6 units = 71 px).
+        for (x in 280..299) for (y in 71..110)
+            assertEquals("The bolt must not reach the signal dots", 0,
+                Color.alpha(full.getPixel(x, y)))
 
         // The bottom arc is complete, from 135° (lower left) to 45° (lower right).
         for (deg in 135 downTo 45 step 5) {

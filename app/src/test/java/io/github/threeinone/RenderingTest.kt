@@ -93,9 +93,11 @@ class RenderingTest {
     }
 
     @Test fun chargingBoltAppearsOnlyWhileChargingOrFull() {
+        // The bolt is a badge in the top corner of the indicator: it is pinned to the
+        // right edge, above the signal dots.
         fun boltInk(state: IndicatorState): Int {
             val b = render(state)
-            return (0 until 70).sumOf { y -> (240..295).count { x -> Color.alpha(b.getPixel(x, y)) > 0 } }
+            return (0 until 70).sumOf { y -> (275..299).count { x -> Color.alpha(b.getPixel(x, y)) > 0 } }
         }
         assertEquals("No bolt while discharging", 0, boltInk(IndicatorState.demo))
         assertTrue("Bolt missing while charging",
