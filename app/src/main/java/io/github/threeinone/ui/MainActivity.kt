@@ -56,9 +56,9 @@ class MainActivity : Activity() {
 
     override fun onCreate(bundle: Bundle?) {
         super.onCreate(bundle)
-        @Suppress("DEPRECATION")
-        prefs = try { getSharedPreferences(IndicatorConfig.FILE, MODE_WORLD_READABLE) }
-        catch (_: SecurityException) { getSharedPreferences(IndicatorConfig.FILE, MODE_PRIVATE) }
+        // MODE_WORLD_READABLE was removed in Android 10 and now throws, so the modern
+        // cross-process provider bridge is the only supported way to publish the settings.
+        prefs = getSharedPreferences(IndicatorConfig.FILE, MODE_PRIVATE)
         PreferenceMigration.importOnce(prefs,
             java.io.File(applicationInfo.dataDir, "shared_prefs/${IndicatorConfig.FILE}.xml"))
         val normalized = IndicatorConfig.normalizeNumberMode(prefs)

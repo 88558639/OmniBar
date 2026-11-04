@@ -17,6 +17,9 @@ import kotlin.math.min
  *  - the battery level is an arc across the bottom of the same ring.
  */
 class IndicatorRenderer {
+    /** Last logged column state; keeps the diagnostic line from repeating every frame. */
+    private var lastColumnLog = ""
+
     private companion object {
         /** Radius of the signal-dot ring. */
         const val RING_RADIUS = 44f
@@ -80,7 +83,10 @@ class IndicatorRenderer {
         val scale = min(width / 100f, height / 100f)
         val save = canvas.save()
         try {
-            canvas.translate((width - 100 * scale) / 2, (height - 100 * scale) / 2)
+            // Shift the whole indicator up a touch so the Wi-Fi fan, the 5G label and the
+            // battery number sit higher inside the status bar instead of drifting down.
+            val contentShiftY = 8f * scale
+            canvas.translate((width - 100 * scale) / 2, (height - 100 * scale) / 2 - contentShiftY)
             canvas.scale(scale, scale)
             val battery = config.batteryColor(state, tint)
 
@@ -106,6 +112,8 @@ class IndicatorRenderer {
 
             drawSignalDots(canvas, state, config, tint, spread, dotRadius, ringRadius)
             drawBatteryArc(canvas, state, config, tint, battery, ringRadius)
+
+            logSignalColumns(state, config)
 
             if (config.showActivity) {
                 val act = if (state.wifiConnected || state.wifi == WifiPhase.CONNECTING) {
@@ -187,9 +195,25 @@ class IndicatorRenderer {
         if (state.airplane) return
         val angles = floatArrayOf(-33f * spread, -11f * spread, 11f * spread, 33f * spread)
 
-        // The columns are bound to the SIM slots, not to whichever card happens to be in
-        // use: card 1 (slot 0) always owns the left half, card 2 (slot 1) the right one.
-        // A card that is switched off simply leaves its column empty.
+        val bySlot = state.sims.associateBy { it.slot }
+        val card1 = bySlot[0]
+        val card2 = bySlot[1]
+
+        // Dual-card view: both columns are shown. Single-card view: only the card in use
+        // is shown, and it keeps the column of its own slot.
+        val (leftLevel, rightLevel) = columnLevels(state, config)
+        val leftColor = if (state.roaming || (card1?.roaming == true)) config.roamingColor else tint
+        val rightColor = if (card2?.roaming == true) config.roamingColor else tint
+        drawDotSide(canvas, angles, -1f, ringRadius, dotRadius, leftLevel, leftColor)
+        drawDotSide(canvas, angles, 1f, ringRadius, dotRadius, rightLevel, rightColor)
+    }
+
+    /**
+     * Signal levels per column. The columns are bound to the SIM slots, not to whichever
+     * card happens to be in use: card 1 (slot 0) always owns the left half, card 2 (slot 1)
+     * the right one. A card that is switched off simply leaves its column empty.
+     */
+    private fun columnLevels(state: IndicatorState, config: IndicatorConfig): Pair<Int, Int> {
         val bySlot = state.sims.associateBy { it.slot }
         val card1 = bySlot[0]
         val card2 = bySlot[1]
@@ -203,14 +227,23 @@ class IndicatorRenderer {
             else -> card.level.coerceIn(0, 4)
         }
 
-        // Dual-card view: both columns are shown. Single-card view: only the card in use
-        // is shown, and it keeps the column of its own slot.
         val leftLevel = if (config.dualSim) level(card1) else if (activeSlot == 0) level(card1) else 0
         val rightLevel = if (config.dualSim) level(card2) else if (activeSlot == 1) level(card2) else 0
-        val leftColor = if (state.roaming || (card1?.roaming == true)) config.roamingColor else tint
-        val rightColor = if (card2?.roaming == true) config.roamingColor else tint
-        drawDotSide(canvas, angles, -1f, ringRadius, dotRadius, leftLevel, leftColor)
-        drawDotSide(canvas, angles, 1f, ringRadius, dotRadius, rightLevel, rightColor)
+        return leftLevel to rightLevel
+    }
+
+    /**
+     * Mirrors the column assignment into the log. It makes the secondary column verifiable
+     * even when the status bar cannot be captured (locked screen, ambient display).
+     */
+    private fun logSignalColumns(state: IndicatorState, config: IndicatorConfig) {
+        val (left, right) = columnLevels(state, config)
+        val activeSlot = state.sims.firstOrNull { it.dataDefault }?.slot
+        val line = "3IN1: columns dualSim=${config.dualSim} left=$left right=$right active=$activeSlot"
+        if (line != lastColumnLog) {
+            lastColumnLog = line
+            android.util.Log.i("3IN1", line)
+        }
     }
 
     /** One half of the ring; [dir] is -1 for the left side and +1 for the right. */
@@ -311,9 +344,10 @@ class IndicatorRenderer {
     private fun drawBolt(canvas: Canvas, color: Int) {
         val save = canvas.save()
         try {
-            // Sits in the free top-right corner, next to the percentage number.
-            // The glyph itself is drawn around x = 44..58, so shift it into place.
-            canvas.translate(38f, 1f)
+            // Top-right of the indicator, scaled up so the bolt reads clearly next to the
+            // percentage. 1.5x the original glyph, parked in the free corner.
+            canvas.translate(12f, 0f)
+            canvas.scale(1.5f, 1.5f)
             path.reset()
             path.moveTo(53f, 0f); path.lineTo(44f, 12f); path.lineTo(50f, 12f)
             path.lineTo(47f, 21f); path.lineTo(58f, 8f); path.lineTo(52f, 8f); path.close()

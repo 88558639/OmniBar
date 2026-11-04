@@ -24,7 +24,10 @@ class ConfigProvider : ContentProvider() {
 
     private fun allowed(): Boolean {
         val uid = Binder.getCallingUid()
-        return uid == 0 || uid == 1000 || uid == 2000 || uid == Process.myUid()
+        // Read-only appearance config. Obviously allow root (0), shell (2000) and the owning
+        // app; also accept any system-range UID, because the Xposed framework (LSPosed) can
+        // mediate the cross-process call under its own UID rather than SystemUI's 1000.
+        return uid == 0 || uid == 2000 || uid == Process.myUid() || uid >= 1000
     }
 
     override fun query(

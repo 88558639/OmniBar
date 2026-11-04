@@ -72,6 +72,9 @@ class SystemStateSource(
     private var oplusChargerVoltageMv = 0
     private var oplusWatts = 0
 
+    /** Last serialized SIM snapshot, so we only log when the rendering input actually changes. */
+    private var lastSimsSig: String? = null
+
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {
             if (intent?.action == Intent.ACTION_BATTERY_CHANGED) {
@@ -460,6 +463,11 @@ class SystemStateSource(
             sims = sims,
             networkReady = simPhase != SimPhase.UNKNOWN || current.airplane || wifiConnected
         )
+        val sig = sims.joinToString(prefix = "[", postfix = "]") { "${it.slot}:${it.level}:${it.phase}" }
+        if (sig != lastSimsSig) {
+            lastSimsSig = sig
+            XposedBridge.log("3IN1: sims=$sig defaultSub=$defaultSub")
+        }
     }
 
     private fun emit() {

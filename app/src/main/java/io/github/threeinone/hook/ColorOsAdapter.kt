@@ -24,6 +24,7 @@ import io.github.threeinone.render.IndicatorView
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.util.IdentityHashMap
+import java.util.concurrent.Executors
 
 /**
  * ColorOS 17 status-bar adapter.
@@ -46,6 +47,8 @@ import java.util.IdentityHashMap
  */
 class ColorOsAdapter(private val loader: ClassLoader) {
     private val main = Handler(Looper.getMainLooper())
+    /** Background worker for the cross-process settings bridge. */
+    private val io = Executors.newSingleThreadExecutor()
     private var context: Context? = null
     private var config = IndicatorConfig()
     private var state = IndicatorState()
@@ -71,6 +74,10 @@ class ColorOsAdapter(private val loader: ClassLoader) {
     private var source: SystemStateSource? = null
     private var pendingProbeToken: String? = null
     private var lastFingerprint: List<Any> = emptyList()
+    private var lastConfigSource = "none"
+    private var providerRetries = 0
+    private var mirrorFile: java.io.File? = null
+    private var mirrorRevision = 0L
 
     /** One mounted indicator, bound to one battery view. */
     private inner class Session(val host: ViewGroup, val root: ViewGroup, val lockscreen: Boolean) {
@@ -273,6 +280,14 @@ class ColorOsAdapter(private val loader: ClassLoader) {
     private fun initialize(c: Context) {
         if (context != null) return
         context = c
+        // Mirror of the app settings; lives in the SystemUI process so the module keeps
+        // working while the app process is stopped (fresh install, boot, app killed).
+        mirrorFile = runCatching {
+            val dir = runCatching { c.filesDir }.getOrNull()
+                ?: java.io.File(c.applicationInfo.dataDir, "files")
+            java.io.File(dir, "3in1-mirror.conf")
+        }.getOrNull()
+        XposedBridge.log("3IN1: mirror file=${mirrorFile?.absolutePath}")
         c.registerReceiver(object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent?.action == IndicatorConfig.REFRESH) {
@@ -290,15 +305,7 @@ class ColorOsAdapter(private val loader: ClassLoader) {
 
     private fun reload() {
         main.post {
-            val next = loadConfig()
-            config = next
-            revision = readRevision()
-            guarded {
-                // The switch may only turn on after the configuration arrives, so the
-                // state source has to be (re)evaluated right after loading it.
-                manageSource()
-                refresh(layout = true)
-            }
+            loadConfig()
             val token = pendingProbeToken.also { pendingProbeToken = null }
             report(token)
         }
@@ -307,42 +314,153 @@ class ColorOsAdapter(private val loader: ClassLoader) {
     /**
      * Settings cross the process boundary through [io.github.threeinone.config.ConfigProvider];
      * the legacy shared-preferences file is only a fallback.
+     *
+     * Both live channels require the app process to be running. On Android 15 a freshly
+     * installed app sits in the "stopped" state, so neither the provider nor the
+     * shared-preferences bridge answers and the module would fall back to an all-default
+     * configuration (indicator switched off). A mirror of the last known settings is kept
+     * inside the SystemUI process for exactly that case.
+     *
+     * The provider is queried off the main thread: it is a cross-process call and the app
+     * process may be frozen, which would otherwise stall the whole status bar.
      */
     private fun loadConfig(): IndicatorConfig {
-        val ctx = context
-        var source = "none"
-        var result: IndicatorConfig? = null
-        if (ctx != null) {
+        val local = readLocalConfig()
+        if (local != null) {
+            applyConfig(local.first, local.second)
+            fetchProviderConfig()
+            return local.first
+        }
+        fetchProviderConfig()
+        return IndicatorConfig()
+    }
+
+    /** Locally available settings: the preferences bridge first, the mirror as fallback. */
+    private fun readLocalConfig(): Pair<IndicatorConfig, String>? {
+        // XSharedPreferences is served by the app process; an empty preference set means the
+        // app has not been started yet and must not override the mirror.
+        val prefs = runCatching {
+            val p = XSharedPreferences(IndicatorConfig.PACKAGE, IndicatorConfig.FILE)
+            p.reload()
+            p
+        }.getOrNull()
+        if (prefs != null && runCatching { prefs.all.isNotEmpty() }.getOrDefault(false)) {
+            return IndicatorConfig.read(prefs) to "xsharedprefs"
+        }
+        val mirror = readMirror()
+        return if (mirror != null) mirror to "mirror" else null
+    }
+
+    /** Queries the app for the live settings in the background and applies them. */
+    private fun fetchProviderConfig() {
+        val ctx = context ?: return
+        io.execute {
             val bundle = runCatching {
                 ctx.contentResolver.call(
                     Uri.parse("content://${IndicatorConfig.PACKAGE}.config"), "config", null, null)
-            }.getOrNull()
-            if (bundle != null) {
-                result = IndicatorConfig.fromBundle(bundle)
-                source = "provider"
+            }.onFailure { XposedBridge.log("3IN1: provider call failed: ${it.message}") }.getOrNull()
+            val rev = runCatching {
+                ctx.contentResolver.call(
+                    Uri.parse("content://${IndicatorConfig.PACKAGE}.config"), "revision", null, null)
+                    ?.getLong("revision") ?: 0L
+            }.getOrDefault(0L)
+            main.post {
+                if (bundle != null) {
+                    providerRetries = 0
+                    applyConfig(IndicatorConfig.fromBundle(bundle), "provider", rev)
+                } else {
+                    scheduleProviderRetry()
+                }
             }
         }
-        if (result == null) {
-            result = runCatching {
-                val prefs = XSharedPreferences(IndicatorConfig.PACKAGE, IndicatorConfig.FILE)
-                prefs.reload()
-                IndicatorConfig.read(prefs)
-            }.getOrElse { IndicatorConfig() }
-            source = "xsharedprefs"
-        }
-        XposedBridge.log(
-            "3IN1: config[$source] enabled=${result.enabled} dualSim=${result.dualSim} " +
-                "size=${result.size} dotScale=${result.dotScale} swap=${result.swap} " +
-                "showActivity=${result.showActivity} showVpn=${result.showVpn}"
-        )
-        return result
     }
 
-    private fun readRevision(): Long = runCatching {
-        context?.contentResolver?.call(
-            Uri.parse("content://${IndicatorConfig.PACKAGE}.config"), "revision", null, null
-        )?.getLong("revision") ?: 0L
-    }.getOrDefault(0L)
+    /** Stores the settings and refreshes the mounted indicators. */
+    private fun applyConfig(cfg: IndicatorConfig, source: String, rev: Long = revision) {
+        config = cfg
+        revision = if (source == "mirror") mirrorRevision else rev
+        if (source == "provider" || source == "xsharedprefs") writeMirror(cfg, rev)
+        lastConfigSource = source
+        XposedBridge.log(
+            "3IN1: config[$source] enabled=${cfg.enabled} dualSim=${cfg.dualSim} " +
+                "size=${cfg.size} dotScale=${cfg.dotScale} swap=${cfg.swap} " +
+                "showActivity=${cfg.showActivity} showVpn=${cfg.showVpn}"
+        )
+        android.util.Log.i("3IN1", "config[$source] enabled=${cfg.enabled} dualSim=${cfg.dualSim}")
+        guarded {
+            manageSource()
+            refresh(layout = true)
+        }
+    }
+
+    /**
+     * Mirror of the app settings, kept inside the SystemUI process.
+     *
+     * It is a plain file instead of a shared preference: the status-bar process cannot
+     * rely on the preference services here (Android 15 redirects them into the APEX area
+     * and the SystemUI package has no preference directory at all), while its own files
+     * directory is always writable.
+     */
+    private fun writeMirror(cfg: IndicatorConfig, rev: Long) {
+        runCatching {
+            val file = mirrorFile ?: return
+            val bundle = cfg.toBundle()
+            val text = buildString {
+                for (key in bundle.keySet()) {
+                    @Suppress("DEPRECATION")
+                    val value = when (val v = bundle.get(key)) {
+                        is Boolean -> "b:${if (v) 1 else 0}"
+                        is Int -> "i:$v"
+                        is Long -> "l:$v"
+                        is String -> "s:$v"
+                        else -> continue
+                    }
+                    append(key).append('=').append(value).append('\n')
+                }
+                append("revision=l:").append(rev).append('\n')
+            }
+            file.parentFile?.mkdirs()
+            file.writeText(text)
+        }.onFailure { XposedBridge.log("3IN1: mirror write failed: ${it.message}") }
+    }
+
+    private fun readMirror(): IndicatorConfig? = runCatching {
+        val file = mirrorFile ?: return null
+        if (!file.isFile) return null
+        val values = file.readLines().mapNotNull { line ->
+            val idx = line.indexOf('=')
+            if (idx <= 0) null else line.substring(0, idx) to line.substring(idx + 1)
+        }.toMap()
+        if (values.isEmpty()) return null
+        val bundle = android.os.Bundle()
+        for ((key, raw) in values) {
+            when {
+                raw.startsWith("b:") -> bundle.putBoolean(key, raw.substring(2) == "1")
+                raw.startsWith("i:") -> raw.substring(2).toIntOrNull()?.let { bundle.putInt(key, it) }
+                raw.startsWith("l:") -> raw.substring(2).toLongOrNull()?.let { bundle.putLong(key, it) }
+                raw.startsWith("s:") -> bundle.putString(key, raw.substring(2))
+            }
+        }
+        mirrorRevision = values["revision"]?.removePrefix("l:")?.toLongOrNull() ?: 0L
+        IndicatorConfig.fromBundle(bundle)
+    }.getOrNull()
+
+    /**
+     * Re-tries the provider bridge while it is still unreachable (typically right after a
+     * reboot, when the app has not been started yet) and applies the settings as soon as the
+     * live values arrive.
+     */
+    private fun scheduleProviderRetry() {
+        if (providerRetries >= 4) return
+        val delay = when (providerRetries) {
+            0 -> 5_000L
+            1 -> 15_000L
+            2 -> 45_000L
+            else -> 120_000L
+        }
+        providerRetries++
+        main.postDelayed({ fetchProviderConfig() }, delay)
+    }
 
     // ------------------------------------------------------------------ state
 
