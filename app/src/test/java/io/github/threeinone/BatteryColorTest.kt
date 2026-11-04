@@ -63,9 +63,10 @@ class BatteryColorTest {
         assertEquals(cfg.ppsColor, cfg.batteryColor(
             charging.copy(chargeProtocol = ChargeProtocol.PPS), Color.WHITE))
         // A plain charger, and a fast charger of an unknown rail.
-        assertEquals(cfg.slowChargeColor, cfg.batteryColor(
+        // A plain slow charger and a fast charger of an unknown rail are both orange.
+        assertEquals(cfg.unknownColor, cfg.batteryColor(
             charging.copy(chargeProtocol = ChargeProtocol.SLOW), Color.WHITE))
-        assertEquals(cfg.slowChargeColor, cfg.batteryColor(
+        assertEquals(cfg.unknownColor, cfg.batteryColor(
             charging.copy(chargeProtocol = ChargeProtocol.FAST), Color.WHITE))
         // A protocol that could not be read at all.
         assertEquals(cfg.unknownColor, cfg.batteryColor(charging, Color.WHITE))
@@ -124,19 +125,20 @@ class BatteryColorTest {
         val migrated = IndicatorConfig.fromBundle(old)
         assertEquals(0xFF2ECC71.toInt(), migrated.ufcsColor)
         assertEquals(0xFF3B82F6.toInt(), migrated.ppsColor)
-        assertEquals(0xFF64748B.toInt(), migrated.slowChargeColor)
         assertEquals(0xFFF97316.toInt(), migrated.unknownColor)
     }
 
     @Test fun aCustomisedOldPaletteIsLeftAlone() {
-        // A colour the user picked does not move to another slot.
+        // A colour the user picked does not move to another slot: the green they chose
+        // for PPS is now the tone of a third-party UFCS charger.
         val old = android.os.Bundle().apply {
             putInt("ppsColor", 0xFF123456.toInt())
             putInt("slowChargeColor", 0xFF654321.toInt())
         }
         val migrated = IndicatorConfig.fromBundle(old)
         assertEquals(0xFF123456.toInt(), migrated.ufcsColor)
-        assertEquals(0xFF654321.toInt(), migrated.slowChargeColor)
+        // The old slow-charging slot is gone, so PPS gets the blue default.
+        assertEquals(0xFF3B82F6.toInt(), migrated.ppsColor)
     }
 
     @Test fun vpnShieldDrawnWhenEnabledAndActive() {
