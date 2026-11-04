@@ -127,7 +127,7 @@ class MainActivity : Activity() {
             setPadding(dp(8), dp(12), dp(8), dp(12))
         }
         val actualFrame = FrameLayout(this)
-        small = IndicatorView(this).apply { tint = ink }
+        small = IndicatorView(this).apply { tint = ink; alignInStatusBar = false }
         actualFrame.addView(small, FrameLayout.LayoutParams(dp(22), dp(28), Gravity.CENTER))
         natural.addView(actualFrame, LinearLayout.LayoutParams(-1, dp(76)))
         natural.addView(label("实际尺寸", 12f, muted).apply { gravity = Gravity.CENTER })
@@ -136,7 +136,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
             background = shape(Color.rgb(21, 25, 27), 6f)
         }
-        large = IndicatorView(this).apply { tint = Color.WHITE }
+        large = IndicatorView(this).apply { tint = Color.WHITE; alignInStatusBar = false }
         enlarged.addView(large, LinearLayout.LayoutParams(dp(90), dp(104)))
         enlarged.addView(label("放大预览", 12f, Color.rgb(181, 195, 200)).apply { gravity = Gravity.CENTER })
         previews.addView(enlarged, LinearLayout.LayoutParams(0, dp(130), 1f))

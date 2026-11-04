@@ -235,6 +235,13 @@ class ColorOsAdapter(private val loader: ClassLoader) {
         initialize(host.context)
         val session = Session(host, root, lockscreen)
         sessions[host] = session
+        // The indicator is lifted out of the battery view, which is parked at the bottom of
+        // the status bar. Nothing on the way up may clip it.
+        var clipper: ViewGroup? = host
+        while (clipper != null) {
+            clipper.clipChildren = false
+            clipper = clipper.parent as? ViewGroup
+        }
         host.addView(session.indicator, ViewGroup.LayoutParams(
             (config.size * density(root)).toInt(), ViewGroup.LayoutParams.MATCH_PARENT))
         root.viewTreeObserver.addOnGlobalLayoutListener(session.layoutListener)
