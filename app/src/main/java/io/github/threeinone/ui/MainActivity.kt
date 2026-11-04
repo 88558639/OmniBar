@@ -187,7 +187,7 @@ class MainActivity : Activity() {
         slider("严重电量阈值", "criticalThreshold", 1, 20, 10, "%")
         section("充电配色")
         toggle("按充电协议自动配色", "chargeColorAuto", true)
-        colorRow("SuperVOOC · 紫", "voocColor", 0xFF9C6BFF.toInt())
+        colorRow("原装充电器 · 紫", "voocColor", 0xFF9C6BFF.toInt())
         colorRow("PPS · 绿", "ppsColor", 0xFF2ECC71.toInt())
         colorRow("普通 / 慢充 · 蓝", "slowChargeColor", 0xFF3B82F6.toInt())
         colorRow("自定义充电色", "chargingColor", 0xFF1CB753.toInt())

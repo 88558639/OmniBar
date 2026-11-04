@@ -72,6 +72,15 @@ class SystemStateSource(
     private var oplusChargerVoltageMv = 0
     private var oplusWatts = 0
 
+    /**
+     * The charge type the charger IC negotiated, read from the battery service
+     * properties.
+     *
+     * Oplus' `fast_chg_type` broadcast extra stays 0 on UFCS chargers — the real value
+     * (6 = UFCS) only reaches the system through the battery property of the same name.
+     */
+    private var batteryFastChgType = 0
+
     /** Last serialized SIM snapshot, so we only log when the rendering input actually changes. */
     private var lastSimsSig: String? = null
 
@@ -81,6 +90,7 @@ class SystemStateSource(
                 current = BatterySnapshot.apply(current, intent)
                 negotiatedCurrentMa = intent.getIntExtra(EXTRA_MAX_CHARGING_CURRENT, 0) / 1000
                 negotiatedVoltageMv = intent.getIntExtra(EXTRA_MAX_CHARGING_VOLTAGE, 0) / 1000
+                refreshChargerTelemetry()
                 applyProtocol()
                 emit()
             }
@@ -110,7 +120,9 @@ class SystemStateSource(
             oplusChargeTechnology = intent.readInt("chargertechnology", oplusChargeTechnology)
             oplusChargePlugged = intent.readInt("chargeplugged", oplusChargePlugged)
             oplusChargerVoltageMv = intent.readInt("chargervoltage", oplusChargerVoltageMv)
-            oplusWatts = intent.readInt("chargewattage", oplusWatts)
+            // `chargewattage` is deliberately not read here: the broadcast extra lags
+            // behind when the charger is unplugged, while the charger service reports
+            // the current negotiation.
             oplusFastCharger = intent.readBoolean("chargefastcharger", oplusFastCharger)
             applyProtocol()
             emit()
@@ -137,32 +149,78 @@ class SystemStateSource(
             XposedBridge.log(
                 "3IN1: charge protocol=$protocol negotiated=${negotiatedVoltageMv}mV/${negotiatedCurrentMa}mA " +
                     "oplus=[fastType=$oplusFastType ppsMode=$oplusPpsMode tech=$oplusChargeTechnology " +
-                    "plugged=$oplusChargePlugged fast=$oplusFastCharger v=${oplusChargerVoltageMv}mV w=${oplusWatts}]"
+                    "plugged=$oplusChargePlugged fast=$oplusFastCharger v=${oplusChargerVoltageMv}mV w=${oplusWatts}] " +
+                    "battery=[usbFastChgType=$batteryFastChgType]"
             )
         }
         current = current.copy(chargeProtocol = protocol, chargeWatts = oplusWatts)
     }
 
+    /** Detects the charging protocol from the collected telemetry. */
+    private fun detectProtocol(): ChargeProtocol = detectProtocol(
+        chargeTech = batteryFastChgType,
+        fastType = oplusFastType,
+        ppsMode = oplusPpsMode,
+        chargeTechnology = oplusChargeTechnology,
+        plugged = oplusChargePlugged,
+        fastCharger = oplusFastCharger,
+        voltageMv = negotiatedVoltageMv,
+        currentMa = negotiatedCurrentMa,
+        wattage = oplusWatts
+    )
+
     /**
-     * Protocol detection. The Oplus extras are authoritative when present:
-     * `fast_chg_type` is non-zero while the proprietary VOOC rail is negotiated and
-     * `pps_chg_mode` is non-zero while PPS is in use. Without them the negotiated
-     * current/voltage still allow a rough fast-versus-slow guess.
+     * Reads the charge technology the charger IC negotiated.
+     *
+     * The Oplus battery service keeps the real value in its `usb_fast_chg_type`
+     * property, but the broadcast extra `fast_chg_type` stays 0 on UFCS chargers. The
+     * value is therefore read from the `guardelfthermalcontrol` service, whose
+     * `getPsyChargeTech()` returns exactly what the charger HAL negotiated.
+     *
+     * A failed read keeps the last known value, so a transient service hiccup does not
+     * flip the colour back and forth.
      */
-    private fun detectProtocol(): ChargeProtocol {
-        if (oplusPpsMode > 0) return ChargeProtocol.PPS
-        if (oplusFastType > 0) return ChargeProtocol.SUPER_VOOC
-        if (oplusFastCharger || oplusChargeTechnology > 0) return ChargeProtocol.FAST
-        // Plugged in, but the firmware reports no proprietary fast protocol: a plain
-        // USB charger, i.e. the slow-charging case.
-        if (oplusChargePlugged > 0) return ChargeProtocol.SLOW
-        if (negotiatedVoltageMv > 0) {
-            // 11 V is OnePlus/OPPO's proprietary SuperVOOC rail; PPS tops out around 9 V.
-            if (negotiatedVoltageMv >= 10000) return ChargeProtocol.SUPER_VOOC
-            if (negotiatedVoltageMv >= 9000 && negotiatedCurrentMa >= 4000) return ChargeProtocol.PPS
-            return if (negotiatedVoltageMv >= 9000) ChargeProtocol.FAST else ChargeProtocol.SLOW
+    private fun refreshChargerTelemetry() {
+        runCatching { queryGuardElf(TRANSACTION_GET_PSY_CHARGE_TECH) }.getOrNull()
+            ?.let { if (it >= 0) batteryFastChgType = it }
+        // The negotiated power is what tells an original OnePlus charger from a
+        // third-party one that happens to speak UFCS as well.
+        runCatching { queryGuardElf(TRANSACTION_GET_BATT_PPS_CHG_POWER) }.getOrNull()
+            ?.let { if (it >= 0) oplusWatts = it }
+    }
+
+    /**
+     * Fetches a system service binder.
+     *
+     * `ServiceManager.getService` is a hidden API, so it is called reflectively.
+     */
+    private fun serviceBinder(name: String): android.os.IBinder? = runCatching {
+        val clazz = Class.forName("android.os.ServiceManager")
+        val method = clazz.getMethod("getService", String::class.java)
+        method.invoke(null, name) as? android.os.IBinder
+    }.getOrNull()
+
+    /**
+     * Calls a no-argument `int` getter on the `guardelfthermalcontrol` service.
+     *
+     * The interface is a hidden API, so it is reached over Binder directly: the
+     * service binder is fetched from ServiceManager and the method is invoked with the
+     * transaction code its stub uses.
+     */
+    private fun queryGuardElf(transaction: Int): Int? {
+        val binder = serviceBinder(SERVICE_GUARD_ELF_THERMAL) ?: return null
+        val parcel = android.os.Parcel.obtain()
+        val reply = android.os.Parcel.obtain()
+        return try {
+            parcel.writeInterfaceToken(INTERFACE_GUARD_ELF_THERMAL)
+            parcel.writeInt(0)
+            if (!binder.transact(transaction, parcel, reply, 0)) return null
+            reply.readException()
+            reply.readInt()
+        } finally {
+            parcel.recycle()
+            reply.recycle()
         }
-        return ChargeProtocol.NONE
     }
 
     private val miscReceiver = object : BroadcastReceiver() {
@@ -262,6 +320,7 @@ class SystemStateSource(
         context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED), Context.RECEIVER_EXPORTED)
             ?.let {
                 current = BatterySnapshot.apply(current, it)
+                refreshChargerTelemetry()
                 XposedBridge.log("3IN1: sticky battery level=${current.battery} observed=${current.batteryObserved}")
             }
             ?: XposedBridge.log("3IN1: no sticky battery broadcast received")
@@ -495,6 +554,90 @@ class SystemStateSource(
          * hidden in the public SDK, but the extra keys are stable AOSP contract and carry
          * the negotiated charger current (µA) and voltage (µV).
          */
+        /**
+         * The charge technology the charger IC negotiated, as reported by
+         * `getPsyChargeTech()`.
+         *
+         * These are the `usb_fast_chg_type` codes used by the Oplus charger HAL:
+         * 3 = SuperVOOC, 4 = PPS, 6 = UFCS. The battery service also reports a
+         * coarser `usb_charge_technology` code (14 on UFCS) through the same call.
+         */
+        const val FAST_CHG_TYPE_VOOC = 3
+        const val FAST_CHG_TYPE_PPS = 4
+        const val FAST_CHG_TYPE_UFCS = 6
+
+        /** The coarser charge technology code the battery service reports for UFCS. */
+        const val CHARGE_TECH_UFCS = 14
+
+        /**
+         * The negotiated power from which on the charger counts as the proprietary
+         * SuperVOOC rail.
+         *
+         * The original OnePlus charger reaches 100 W and above; third-party UFCS
+         * chargers top out well below that, which is what tells the two apart.
+         */
+        const val VOOC_WATTAGE = 60
+
+        /** The `guardelfthermalcontrol` service that exposes the charger state. */
+        const val SERVICE_GUARD_ELF_THERMAL = "guardelfthermalcontrol"
+
+        /** Its Binder interface. */
+        const val INTERFACE_GUARD_ELF_THERMAL = "android.os.IGuardElfThermalControl"
+
+        /** Transaction code of `getPsyChargeTech()` in that interface. */
+        const val TRANSACTION_GET_PSY_CHARGE_TECH = 25
+
+        /** Transaction code of `getBattPPSChgPower()`, the negotiated power in watts. */
+        const val TRANSACTION_GET_BATT_PPS_CHG_POWER = 22
+
+        /**
+         * Maps the charging telemetry onto a protocol.
+         *
+         * The violet tone belongs to OnePlus' own SuperVOOC rail, which only the
+         * original charger negotiates — and on this firmware the original charger
+         * reports UFCS, not SuperVOOC, because UFCS is the public USB fast-charge
+         * standard the charger also speaks. The protocol alone therefore cannot tell
+         * an original charger from a third-party one that happens to support UFCS.
+         *
+         * The negotiated power does: only the original charger reaches the 100 W and
+         * above range, so a high wattage is the marker for the proprietary rail.
+         * Everything else falls back to the protocol the firmware reports.
+         */
+        fun detectProtocol(
+            chargeTech: Int,
+            fastType: Int,
+            ppsMode: Int,
+            chargeTechnology: Int,
+            plugged: Int,
+            fastCharger: Boolean,
+            voltageMv: Int,
+            currentMa: Int,
+            wattage: Int
+        ): ChargeProtocol {
+            // The proprietary VOOC rail: the original charger, at its full power.
+            if (wattage >= VOOC_WATTAGE) return ChargeProtocol.SUPER_VOOC
+            // A UFCS charger that is not the original one: fast, but not SuperVOOC.
+            if (chargeTech == CHARGE_TECH_UFCS) return ChargeProtocol.FAST
+            when (chargeTech) {
+                FAST_CHG_TYPE_VOOC -> return ChargeProtocol.SUPER_VOOC
+                FAST_CHG_TYPE_PPS -> return ChargeProtocol.PPS
+            }
+            if (fastType > 0) return ChargeProtocol.SUPER_VOOC
+            // The charge technology is unknown but the firmware reports a proprietary
+            // fast charger: fast, but not one of the named rails.
+            if (fastCharger || chargeTechnology > 0) return ChargeProtocol.FAST
+            // Plugged in, but the firmware reports no proprietary fast protocol: a plain
+            // USB charger, i.e. the slow-charging case.
+            if (plugged > 0) return ChargeProtocol.SLOW
+            if (voltageMv > 0) {
+                // 11 V is OnePlus/OPPO's proprietary SuperVOOC rail; PPS tops out around 9 V.
+                if (voltageMv >= 10000) return ChargeProtocol.SUPER_VOOC
+                if (voltageMv >= 9000 && currentMa >= 4000) return ChargeProtocol.PPS
+                return if (voltageMv >= 9000) ChargeProtocol.FAST else ChargeProtocol.SLOW
+            }
+            return ChargeProtocol.NONE
+        }
+
         const val EXTRA_MAX_CHARGING_CURRENT = "max_charging_current"
         const val EXTRA_MAX_CHARGING_VOLTAGE = "max_charging_voltage"
     }
