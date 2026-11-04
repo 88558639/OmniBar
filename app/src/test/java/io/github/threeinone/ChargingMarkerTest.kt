@@ -100,6 +100,12 @@ class ChargingMarkerTest {
         // The bolt itself is drawn in the same band, as a single glyph.
         assertEquals(1, inkClusters(full, 242, 299, 0, 40).size)
 
+        // The bolt is a badge on the percentage: it must sit right of the digits and
+        // stay clear of the first signal dot of the right column (x = 93 units).
+        val bolt = inkClusters(full, 200, 299, 0, 40).last()
+        assertTrue("The bolt must start right of the percentage", bolt.first > 240)
+        assertTrue("The bolt must not reach the signal dots", bolt.last < 279)
+
         // The bottom arc is complete, from 135° (lower left) to 45° (lower right).
         for (deg in 135 downTo 45 step 5) {
             val rad = Math.toRadians(deg.toDouble())

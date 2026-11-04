@@ -96,11 +96,34 @@ class IndicatorRenderer {
 
         /** The "--" placeholder is drawn smaller than a real network type. */
         const val PLACEHOLDER_SIZE_RATIO = 0.62f
+
+        /**
+         * Size of the charging bolt once it became a badge on the percentage.
+         *
+         * The glyph is 14 x 21 units; a badge has to stay readable without competing
+         * with the number itself.
+         */
+        const val BOLT_SCALE = 0.8f
+
+        /** Distance between the percentage and the badge on its right. */
+        const val BOLT_GAP = 1f
+
+        /**
+         * The badge may never reach the signal dots: the first dot of the right column
+         * sits at x = 93 units and its top edge at y = 39 units.
+         */
+        const val BOLT_MAX_RIGHT = 92f
     }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bounds = RectF()
     private val path = Path()
+
+    /** Right edge of the percentage glyphs — the bolt is anchored to it. */
+    private var numberRight = 0f
+
+    /** Top edge of the percentage glyphs. */
+    private var numberTop = 0f
 
     fun draw(
         canvas: Canvas, width: Float, height: Float, state: IndicatorState, config: IndicatorConfig,
@@ -179,6 +202,11 @@ class IndicatorRenderer {
         } else {
             canvas.drawText(value, 50f, baseline, paint)
         }
+        // Remember where the glyphs end: the charging bolt hangs on that corner as a badge.
+        val glyphs = Rect()
+        paint.getTextBounds(value, 0, value.length, glyphs)
+        numberRight = 50f + min(width, NUMBER_MAX_WIDTH) / 2f
+        numberTop = baseline + glyphs.top
     }
 
     // ------------------------------------------------------------------ network label
@@ -368,13 +396,24 @@ class IndicatorRenderer {
 
     // ------------------------------------------------------------------ badges
 
+    /**
+     * The charging bolt, drawn as a badge on the top right corner of the percentage.
+     *
+     * Parked in the fixed corner of the 100-unit box, the tip of the bolt used to land
+     * right on top of the first signal dot. Anchored to the number instead, it stays
+     * clear of the dots and reads as "this percentage is charging".
+     */
     private fun drawBolt(canvas: Canvas, color: Int) {
         val save = canvas.save()
         try {
-            // Top-right of the indicator, scaled up so the bolt reads clearly next to the
-            // percentage. 1.5x the original glyph, parked in the free corner.
-            canvas.translate(12f, 0f)
-            canvas.scale(1.5f, 1.5f)
+            val s = BOLT_SCALE
+            val badgeWidth = 14f * s
+            val badgeHeight = 21f * s
+            // Right of the number, but never into the signal dots.
+            var left = numberRight + BOLT_GAP
+            if (left + badgeWidth > BOLT_MAX_RIGHT) left = BOLT_MAX_RIGHT - badgeWidth
+            canvas.translate(left - 44f * s, numberTop)
+            canvas.scale(s, s)
             path.reset()
             path.moveTo(53f, 0f); path.lineTo(44f, 12f); path.lineTo(50f, 12f)
             path.lineTo(47f, 21f); path.lineTo(58f, 8f); path.lineTo(52f, 8f); path.close()
