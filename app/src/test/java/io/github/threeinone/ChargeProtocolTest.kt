@@ -24,10 +24,11 @@ class ChargeProtocolTest {
         fastCharger: Boolean = false,
         voltageMv: Int = 0,
         currentMa: Int = 0,
-        wattage: Int = 0
+        wattage: Int = 20,
+        charging: Boolean = true
     ) = SystemStateSource.detectProtocol(
         chargeTech, fastType, ppsMode, chargeTechnology, plugged, fastCharger,
-        voltageMv, currentMa, wattage
+        voltageMv, currentMa, wattage, charging
     )
 
     @Test fun originalChargerIsRecognisedByItsPower() {
@@ -48,7 +49,7 @@ class ChargeProtocolTest {
         )
         assertEquals(
             ChargeProtocol.FAST,
-            detect(chargeTech = 14, ppsMode = 4, plugged = 1, wattage = 0)
+            detect(chargeTech = 14, ppsMode = 4, plugged = 1, wattage = 20)
         )
     }
 
@@ -88,6 +89,24 @@ class ChargeProtocolTest {
     }
 
     @Test fun nothingKnownMeansNoProtocol() {
-        assertEquals(ChargeProtocol.NONE, detect())
+        assertEquals(ChargeProtocol.NONE, detect(wattage = 0))
+    }
+
+    @Test fun aChargerThatIsPluggedInButIdleIsNotFastCharging() {
+        // The charge technology keeps its last value while the charger sits idle, so
+        // a plugged-in USB port that is not charging must not look like UFCS.
+        assertEquals(
+            ChargeProtocol.NONE,
+            detect(chargeTech = 14, plugged = 1, fastCharger = true, charging = false)
+        )
+    }
+
+    @Test fun aFullBatteryStillCountsAsCharging() {
+        // A full battery draws no power, so the live reading drops to zero even on the
+        // original charger — the charging state is what keeps the colour.
+        assertEquals(
+            ChargeProtocol.FAST,
+            detect(chargeTech = 14, plugged = 1, wattage = 0, charging = true)
+        )
     }
 }

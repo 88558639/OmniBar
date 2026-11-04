@@ -23,6 +23,7 @@ import android.telephony.TelephonyCallback
 import android.telephony.TelephonyDisplayInfo
 import android.telephony.TelephonyManager
 import de.robv.android.xposed.XposedBridge
+import io.github.threeinone.model.BatteryPhase
 import io.github.threeinone.model.BatterySnapshot
 import io.github.threeinone.model.ChargeProtocol
 import io.github.threeinone.model.DataActivity
@@ -73,13 +74,22 @@ class SystemStateSource(
     private var oplusWatts = 0
 
     /**
-     * The charge type the charger IC negotiated, read from the battery service
-     * properties.
+     * The charge type the charger IC negotiated, read from the battery service.
      *
      * Oplus' `fast_chg_type` broadcast extra stays 0 on UFCS chargers — the real value
-     * (6 = UFCS) only reaches the system through the battery property of the same name.
+     * only reaches the system through the charger service.
      */
     private var batteryFastChgType = 0
+
+    /**
+     * The highest power this charger session negotiated.
+     *
+     * A full battery draws no power at all, so the live reading drops to zero once
+     * the phone is full even though the original charger is still plugged in. Keeping
+     * the peak keeps the colour stable over the whole session; the value is dropped
+     * when the charger is unplugged.
+     */
+    private var peakWatts = 0
 
     /** Last serialized SIM snapshot, so we only log when the rendering input actually changes. */
     private var lastSimsSig: String? = null
@@ -90,6 +100,8 @@ class SystemStateSource(
                 current = BatterySnapshot.apply(current, intent)
                 negotiatedCurrentMa = intent.getIntExtra(EXTRA_MAX_CHARGING_CURRENT, 0) / 1000
                 negotiatedVoltageMv = intent.getIntExtra(EXTRA_MAX_CHARGING_VOLTAGE, 0) / 1000
+                // Unplugged: the next charger starts its own session.
+                if (current.batteryPhase == BatteryPhase.NORMAL) peakWatts = 0
                 refreshChargerTelemetry()
                 applyProtocol()
                 emit()
@@ -166,7 +178,8 @@ class SystemStateSource(
         fastCharger = oplusFastCharger,
         voltageMv = negotiatedVoltageMv,
         currentMa = negotiatedCurrentMa,
-        wattage = oplusWatts
+        wattage = peakWatts,
+        charging = current.batteryPhase in setOf(BatteryPhase.CHARGING, BatteryPhase.FULL)
     )
 
     /**
@@ -186,7 +199,12 @@ class SystemStateSource(
         // The negotiated power is what tells an original OnePlus charger from a
         // third-party one that happens to speak UFCS as well.
         runCatching { queryGuardElf(TRANSACTION_GET_BATT_PPS_CHG_POWER) }.getOrNull()
-            ?.let { if (it >= 0) oplusWatts = it }
+            ?.let {
+                if (it >= 0) {
+                    oplusWatts = it
+                    if (it > peakWatts) peakWatts = it
+                }
+            }
     }
 
     /**
@@ -612,10 +630,15 @@ class SystemStateSource(
             fastCharger: Boolean,
             voltageMv: Int,
             currentMa: Int,
-            wattage: Int
+            wattage: Int,
+            charging: Boolean
         ): ChargeProtocol {
             // The proprietary VOOC rail: the original charger, at its full power.
             if (wattage >= VOOC_WATTAGE) return ChargeProtocol.SUPER_VOOC
+            // A charger that is plugged in but not charging negotiates nothing and
+            // keeps its last protocol, so the charging state decides first. The power
+            // alone cannot: a full battery draws none, even on the original charger.
+            if (!charging) return ChargeProtocol.NONE
             // A UFCS charger that is not the original one: fast, but not SuperVOOC.
             if (chargeTech == CHARGE_TECH_UFCS) return ChargeProtocol.FAST
             when (chargeTech) {

@@ -59,8 +59,12 @@ data class IndicatorConfig(
 
     /**
      * Colour used while charging. In automatic mode the firmware's charging protocol decides:
-     * SuperVOOC (OnePlus/OPPO proprietary) uses the violet tone, PPS the green one and
-     * anything slower the blue one. When the protocol is unknown the legacy colour is kept.
+     * the original OnePlus charger (SuperVOOC) uses the violet tone, PPS the green one and
+     * anything slower the blue one.
+     *
+     * An unknown protocol falls back to the plain charging colour rather than to one of
+     * the protocol tones: the green belongs to PPS alone, and using it for a charger whose
+     * protocol could not be read would claim a protocol that is not in use.
      */
     fun chargeColor(state: IndicatorState): Int = when {
         !chargeColorAuto -> chargingColor
