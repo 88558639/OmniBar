@@ -45,14 +45,20 @@ class ChargingMarkerTest {
             val labels = views.filterIsInstance<TextView>().map { it.text.toString() }
             assertFalse(labels.any { it.contains("始终显示电量数字") })
             assertFalse(labels.any { it.contains("低电量自动显示数字") })
+            // The master switch is gone: the replacement follows the LSPosed module,
+            // so the page no longer offers an "enable" switch at all.
+            assertFalse(labels.any { it.contains("启用三合一") })
+            assertEquals(0, views.count { it.contentDescription == "启用三合一" })
             // Every switch on the page is one of the hand-drawn card switches; the
-            // platform widget is gone for good. The page was reduced to the master
-            // switch plus the two colour toggles.
-            assertEquals(3, views.count { it is CardSwitch })
+            // platform widget is gone for good. Only the two colour toggles are left.
+            assertEquals(2, views.count { it is CardSwitch })
             assertEquals(0, views.count { it is Switch })
             assertFalse(prefs.getBoolean("autoNumber", true))
             assertEquals(30, prefs.getInt("numberThreshold", 0))
             assertEquals(250, prefs.getInt("numberScale", 0))
+            // …and the replacement is published as enabled, so a fresh install works
+            // without an in-app switch.
+            assertTrue(prefs.getBoolean("enabled", false))
         } finally { controller.pause().stop().destroy() }
     }
 

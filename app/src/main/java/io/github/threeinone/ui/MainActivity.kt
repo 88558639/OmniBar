@@ -67,9 +67,14 @@ class MainActivity : Activity() {
         PreferenceMigration.importOnce(prefs,
             java.io.File(applicationInfo.dataDir, "shared_prefs/${IndicatorConfig.FILE}.xml"))
         val normalized = IndicatorConfig.normalizeNumberMode(prefs)
+        // The master switch is gone: whether the stock icons are replaced now follows
+        // the module itself, so the app publishes the replacement as enabled. The only
+        // way to stop it is to disable the module in LSPosed.
+        val published = !prefs.getBoolean("enabled", false)
+        if (published) prefs.edit().putBoolean("enabled", true).commit()
         previewIndex = bundle?.getInt("preview", 0)?.coerceIn(IndicatorState.previews.indices) ?: 0
         buildPage()
-        if (normalized) scheduleSave()
+        if (normalized || published) scheduleSave()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -156,27 +161,6 @@ class MainActivity : Activity() {
         }
         content.addView(card, LinearLayout.LayoutParams(-1, -2))
 
-        // The master switch sits on the status card: it is the one control that
-        // decides whether the stock icons are replaced at all.
-        val master = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(2), 0, dp(6))
-        }
-        val masterTexts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        masterTexts.addView(label("启用三合一", 15.5f))
-        masterTexts.addView(label("替换 ColorOS 状态栏的网络与电量图标", 12f, palette.muted).apply {
-            setPadding(0, dp(3), dp(12), 0)
-            setLineSpacing(dp(2).toFloat(), 1f)
-        })
-        master.addView(masterTexts, LinearLayout.LayoutParams(0, -2, 1f))
-        val masterSwitch = CardSwitch(this).apply {
-            setCheckedSilently(prefs.getBoolean("enabled", false))
-            contentDescription = "启用三合一"
-        }
-        bindMasterSwitch(masterSwitch)
-        master.addView(masterSwitch, LinearLayout.LayoutParams(dp(52), dp(32)))
-        card.addView(master, LinearLayout.LayoutParams(-1, -2))
-
         val head = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         statusDot = StatusDot(this)
         head.addView(statusDot, LinearLayout.LayoutParams(dp(10), dp(10)).apply { marginEnd = dp(8) })
@@ -187,6 +171,14 @@ class MainActivity : Activity() {
         statusTime = label("", 12f, palette.muted)
         head.addView(statusTime)
         card.addView(head, LinearLayout.LayoutParams(-1, -2))
+
+        // There is no master switch any more: the replacement follows the module, so
+        // the only way back to the stock icons is LSPosed.
+        card.addView(label("替换由 LSPosed 模块开关控制，停用本模块并重启 SystemUI 即恢复原生图标。",
+            12f, palette.muted).apply {
+            setPadding(0, dp(6), 0, 0)
+            setLineSpacing(dp(2).toFloat(), 1f)
+        }, LinearLayout.LayoutParams(-1, -2))
 
         // The two previews: the enlarged one on a dark backdrop, the real-size one on a
         // light one, so both the shape and the true footprint are visible.
@@ -341,31 +333,6 @@ class MainActivity : Activity() {
             View(this@MainActivity).apply { setBackgroundColor(palette.stroke) },
             LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(2); bottomMargin = dp(2) }
         )
-    }
-
-    /**
-     * Binds the master switch on the status card.
-     *
-     * Turning the replacement on is easy to misjudge — the stock icons vanish — so the
-     * switch asks first and only stores the choice once the user confirms.
-     */
-    private fun bindMasterSwitch(widget: CardSwitch) {
-        widget.onCheckedChange = { checked: Boolean ->
-            if (!checked) {
-                prefs.edit().putBoolean("enabled", false).apply(); scheduleSave()
-            } else {
-                // Roll the switch back and ask.
-                widget.setCheckedSilently(false)
-                AlertDialog.Builder(this)
-                    .setTitle("启用系统图标替换？")
-                    .setMessage("已按 ColorOS 17 的 SuperIcon 契约实现。首次使用请确认：LSPosed 中已启用本模块、作用域包含 SystemUI，并已重启 SystemUI。异常时在 LSPosed 停用本模块并重启即可恢复。不会自动重启系统。")
-                    .setNegativeButton("取消", null)
-                    .setPositiveButton("启用") { _, _ ->
-                        widget.setCheckedSilently(true)
-                        prefs.edit().putBoolean("enabled", true).apply(); scheduleSave()
-                    }.show()
-            }
-        }
     }
 
     private fun LinearLayout.switchRow(
