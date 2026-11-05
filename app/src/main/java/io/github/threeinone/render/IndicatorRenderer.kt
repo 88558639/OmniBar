@@ -132,6 +132,45 @@ class IndicatorRenderer {
 
         /** The badge may not reach the signal dots — it stays this far above them. */
         const val BOLT_DOT_CLEARANCE = 1.2f
+
+        /**
+         * Scale of the flight-mode plane.
+         *
+         * The plane takes the place of the Wi-Fi fan, but it used to be drawn at barely a
+         * fifth of the glyph size and read as a speck next to the network label. At this
+         * scale it is clearly taller than the "4G" / "5G" text — the eye compares the two,
+         * because they occupy the same place in the layout.
+         */
+        const val AIRPLANE_SCALE = 0.40f
+
+        /**
+         * Top of the band the plane may use.
+         *
+         * The percentage hangs from the top edge of the indicator, so the plane has to
+         * start below the digits; it never rises above this line either.
+         */
+        const val AIRPLANE_MIN_TOP = 36f
+
+        /** Width of the VPN shield glyph in its own units. */
+        const val VPN_WIDTH = 10f
+
+        /** Height of the VPN shield glyph in its own units. */
+        const val VPN_HEIGHT = 12f
+
+        /** Largest the shield may get — it stays a badge, not a second indicator. */
+        const val VPN_MAX_SCALE = 1.6f
+
+        /** Gap between the shield and the percentage. */
+        const val VPN_GAP = 2f
+
+        /** Clearance the shield keeps from the edge of the box. */
+        const val VPN_EDGE = 1f
+
+        /** Top edge of the shield. */
+        const val VPN_TOP = 1.5f
+
+        /** Right edge of the box, for the mirrored layout. */
+        const val BOX_EDGE_RIGHT = 99f
     }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -146,6 +185,9 @@ class IndicatorRenderer {
 
     /** Top edge of the percentage glyphs. */
     private var numberTop = 0f
+
+    /** Bottom edge of the percentage glyphs — the badges below it start there. */
+    private var numberBottom = 0f
 
     fun draw(
         canvas: Canvas, width: Float, height: Float, state: IndicatorState, config: IndicatorConfig,
@@ -240,6 +282,7 @@ class IndicatorRenderer {
         numberLeft = origin + glyphs.left * squeeze
         numberRight = origin + glyphs.right * squeeze
         numberTop = baseline + glyphs.top
+        numberBottom = baseline + glyphs.bottom
     }
 
     // ------------------------------------------------------------------ network label
@@ -472,28 +515,57 @@ class IndicatorRenderer {
         } finally { canvas.restoreToCount(save) }
     }
 
+    /**
+     * The VPN shield.
+     *
+     * It used to be a 10 × 12 unit speck in the top corner — barely visible at status bar
+     * size. It now grows into the space next to the percentage and keeps the same stroke
+     * width, so a larger shield simply carries more detail instead of turning into a blob.
+     *
+     * The shield stands next to the percentage: on the left in the normal layout, on the
+     * right in the mirrored one, where the charging bolt takes the opposite corner.
+     */
     private fun drawVpn(canvas: Canvas, color: Int, swap: Boolean) {
         val save = canvas.save()
         try {
-            val x = if (swap) 78f else 12f
-            stroke(color, 2.4f)
+            val anchor = if (swap) numberRight + VPN_GAP else numberLeft - VPN_GAP
+            val edge = if (swap) BOX_EDGE_RIGHT - VPN_EDGE else VPN_EDGE
+            val room = if (swap) edge - anchor else anchor - edge
+            val scale = min(VPN_MAX_SCALE, room / VPN_WIDTH)
+            val width = VPN_WIDTH * scale
+            canvas.translate(if (swap) anchor else anchor - width, VPN_TOP)
+            canvas.scale(scale, scale)
+            stroke(color, 2.4f / scale)
             path.reset()
-            path.moveTo(x, 4f); path.lineTo(x + 10f, 4f); path.lineTo(x + 10f, 10f)
-            path.lineTo(x + 5f, 16f); path.lineTo(x, 10f); path.close()
+            path.moveTo(0f, 4f); path.lineTo(10f, 4f); path.lineTo(10f, 10f)
+            path.lineTo(5f, 16f); path.lineTo(0f, 10f); path.close()
             canvas.drawPath(path, paint)
             path.reset()
-            path.moveTo(x + 3f, 9f); path.lineTo(x + 5f, 11f); path.lineTo(x + 8f, 7f)
+            path.moveTo(3f, 9f); path.lineTo(5f, 11f); path.lineTo(8f, 7f)
             canvas.drawPath(path, paint)
         } finally { canvas.restoreToCount(save) }
     }
 
     // ------------------------------------------------------------------ helpers
 
+    /**
+     * The flight-mode plane.
+     *
+     * It takes the place of the Wi-Fi fan, so it sits in the middle of the indicator. It
+     * used to be scaled down to a fifth of the glyph size, which made it a speck next to
+     * the network label; it now fills the band between the percentage and the battery arc
+     * and is taller than the "4G" / "5G" text it replaces.
+     */
     private fun airplane(c: Canvas, color: Int) {
         val save = c.save()
         try {
-            c.translate(38.5f, 41.5f)
-            c.scale(.23f, .23f)
+            val scale = AIRPLANE_SCALE
+            val width = 100f * scale
+            // The percentage hangs from the top edge, so the plane starts below the
+            // digits and stays centred on the indicator.
+            val top = maxOf(AIRPLANE_MIN_TOP, numberBottom + 2f)
+            c.translate(50f - width / 2f, top)
+            c.scale(scale, scale)
             path.reset()
             path.moveTo(50f, 0f)
             path.cubicTo(42f, 0f, 40f, 10f, 40f, 20f)

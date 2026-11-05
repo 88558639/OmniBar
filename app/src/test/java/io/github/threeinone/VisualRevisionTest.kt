@@ -229,27 +229,55 @@ class VisualRevisionTest {
     @Test fun airplaneHasRoundedNoseSweptWingsAndSeparateTailInBothModes() {
         for (wifi in listOf(WifiPhase.OFF, WifiPhase.CONNECTED)) {
             val b = render(IndicatorState.demo.copy(airplane = true, wifi = wifi), IndicatorConfig())
+            // The plane is drawn large now, so the sample rows are derived from its own
+            // ink box: the shape is what this test is about, not the size it is drawn at.
+            // The window is narrow enough to keep the battery arc out: its ends reach
+            // into the outer columns, and the plane alone is measured.
+            val box = inkBox(b, 28f, 72f, 33f, 85f)
+            fun row(fraction: Double) = (box.top + box.height() * fraction).toInt()
+            val x0 = 85
+            val x1 = 215
             // Rounded nose: the tip starts narrow and widens towards the body.
-            val tip = inkClusters(b, 100, 200, 125, 125).singleOrNull()
-            val body = inkClusters(b, 100, 200, 140, 140).singleOrNull()
+            val tip = inkClusters(b, x0, x1, row(0.0), row(0.0)).singleOrNull()
+            val body = inkClusters(b, x0, x1, row(0.185), row(0.185)).singleOrNull()
             assertNotNull("Nose is not a single shape", tip)
             assertNotNull("Body is not a single shape", body)
             assertTrue("Nose is not rounded: tip=${tip!!.count()} body=${body!!.count()}",
-                tip.count() <= 8 && body.count() > tip.count())
+                tip.count() <= 10 && body.count() > tip.count())
             // Swept wings: at the wing row the wings and the fuselage are separate.
-            assertEquals(listOf(116..128, 143..156, 171..183), inkClusters(b, 100, 200, 174, 174))
+            assertEquals("box=$box row=${row(0.65)}",
+                3, inkClusters(b, x0, x1, row(0.65), row(0.65)).size)
             // Separate tail: two distinct fins with a gap in the middle.
-            assertEquals(listOf(136..142, 157..163), inkClusters(b, 100, 200, 196, 196))
-            assertEquals(0, Color.alpha(b.getPixel(150, 196)))
+            val tail = inkClusters(b, x0, x1, row(0.965), row(0.965))
+            assertEquals(2, tail.size)
+            assertEquals(0, Color.alpha(b.getPixel((tail.first().first + tail.last().last) / 2, row(0.965))))
             // The plane ends well above the battery arc and never reaches the
-            // bottom edge of the icon.
-            for (y in 199..241) for (x in 100..200)
-                assertEquals("Airplane reaches into the arc", 0, Color.alpha(b.getPixel(x, y)))
+            // bottom edge of the icon. The arc itself starts below this line: its
+            // stroke reaches up to y = 264 in the outer columns.
+            for (y in (box.bottom + 2)..255) for (x in x0..x1)
+                assertEquals("Airplane reaches into the arc at $x,$y", 0, Color.alpha(b.getPixel(x, y)))
             for (x in 0 until 300) {
                 val bottom = Color.alpha(b.getPixel(x, 299))
                 if (bottom > 0) assertTrue("Unexpected element at the bottom edge: $x", x in 120..180)
             }
         }
+    }
+
+    /** Ink box inside the given window (in indicator units), in pixels. */
+    private fun inkBox(b: Bitmap, x0: Float, x1: Float, y0: Float, y1: Float): Rect {
+        var minX = Int.MAX_VALUE
+        var minY = Int.MAX_VALUE
+        var maxX = -1
+        var maxY = -1
+        for (y in (y0 * 3).toInt()..(y1 * 3).toInt()) for (x in (x0 * 3).toInt()..(x1 * 3).toInt()) {
+            if (Color.alpha(b.getPixel(x, y)) > 32) {
+                if (x < minX) minX = x
+                if (x > maxX) maxX = x
+                if (y < minY) minY = y
+                if (y > maxY) maxY = y
+            }
+        }
+        return Rect(minX, minY, maxX, maxY)
     }
 
     @Test fun updatedStatesAndExtremeParametersContactSheet() {
