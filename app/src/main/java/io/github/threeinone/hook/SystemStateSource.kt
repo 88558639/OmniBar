@@ -84,6 +84,9 @@ class SystemStateSource(
     /** The charger technology level the charging IC reports. */
     private var chargerTechnologyLevel = 0
 
+    /** Whether the charger is running the PPS protocol, as the charging IC reports it. */
+    private var ppsChgIng = 0
+
     /**
      * The highest power this charger session negotiated.
      *
@@ -96,6 +99,30 @@ class SystemStateSource(
 
     /** Last serialized SIM snapshot, so we only log when the rendering input actually changes. */
     private var lastSimsSig: String? = null
+
+    /** Last sysfs-derived protocol, so the diagnostic line does not repeat every tick. */
+    private var lastSysfsProtocol: ChargeProtocol? = null
+
+    /**
+     * Oplus sysfs node that carries the negotiated charge technology as a string
+     * (VOOC / SUPERVOOC / UFCS / PPS / PD …). This is the exact source the
+     * `*#899#` engineering-mode "快充模式" field and the 电池检测 app read, so it is
+     * the ground truth for which protocol is actually running — and it matches what
+     * the user sees there.
+     */
+    private val CHARGE_TECHNOLOGY_PATHS = listOf(
+        "/sys/class/oplus_chg/battery/charge_technology"
+    )
+
+    /**
+     * Oplus sysfs node that carries the charge type as an integer (0 none, 2 normal,
+     * 8 VOOC-basic, 14 SuperVOOC, 16 PD …). Confirms the protocol when the string
+     * node above is empty.
+     */
+    private val CHARGE_TYPE_PATHS = listOf(
+        "/sys/class/power_supply/battery/charge_type",
+        "/sys/class/power_supply/bms/charge_type"
+    )
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {
@@ -162,16 +189,69 @@ class SystemStateSource(
         else -> fallback
     }
 
+    /**
+     * Reads the first line of a sysfs node, tolerating nodes that are missing or not
+     * readable on this device (non-Oplus firmware, SELinux denials). A null result
+     * lets the caller fall back to the broadcast / voltage heuristic.
+     */
+    private fun readSysfsLine(path: String): String? = runCatching {
+        val f = java.io.File(path)
+        if (!f.canRead()) return@runCatching null
+        f.bufferedReader().use { it.readLine()?.trim() }
+    }.getOrNull()?.takeIf { it.isNotEmpty() }
+
+    /**
+     * Reads the negotiated charge protocol straight from the Oplus charging driver's
+     * sysfs nodes — the same data the `*#899#` engineering mode and the 电池检测 app
+     * display, so the indicator's colour now matches the "快充模式" the user sees there.
+     *
+     * `charge_technology` reports the protocol as a string; `charge_type` reports it
+     * as an integer (14 = SuperVOOC, 16 = PD, 8 = VOOC-basic). Either one is
+     * authoritative; the broadcast / voltage heuristic below is only a fallback for
+     * devices where these Oplus nodes are absent.
+     */
+    private fun protocolFromSysfs(): ChargeProtocol? {
+        val tech = CHARGE_TECHNOLOGY_PATHS.firstNotNullOfOrNull { readSysfsLine(it) }
+        if (tech != null) {
+            val up = tech.uppercase()
+            return when {
+                up.contains("SUPERVOOC") || up.contains("VOOC") -> ChargeProtocol.SUPER_VOOC
+                up.contains("UFCS") -> ChargeProtocol.UFCS
+                up.contains("PPS") -> ChargeProtocol.PPS
+                up.contains("PD") -> ChargeProtocol.FAST
+                else -> null
+            }
+        }
+        val type = CHARGE_TYPE_PATHS.firstNotNullOfOrNull { readSysfsLine(it) }?.toIntOrNull()
+        return when (type) {
+            14 -> ChargeProtocol.SUPER_VOOC
+            16 -> ChargeProtocol.FAST
+            8 -> ChargeProtocol.SUPER_VOOC
+            else -> null
+        }
+    }
+
     private fun applyProtocol() {
-        val protocol = detectProtocol()
-        if (protocol != current.chargeProtocol || oplusWatts != current.chargeWatts) {
+        val charging = current.batteryPhase in setOf(BatteryPhase.CHARGING, BatteryPhase.FULL)
+        // The Oplus driver's sysfs node is the authoritative protocol; only fall back
+        // to the broadcast / voltage heuristic when it is unavailable (non-Oplus
+        // firmware) or the charger is idle (the node can hold a stale value).
+        val sysfs = if (charging) protocolFromSysfs() else null
+        val protocol = sysfs ?: detectProtocol()
+        if (protocol != current.chargeProtocol || oplusWatts != current.chargeWatts ||
+            sysfs != lastSysfsProtocol
+        ) {
+            val tech = CHARGE_TECHNOLOGY_PATHS.firstNotNullOfOrNull { readSysfsLine(it) } ?: "n/a"
+            val type = CHARGE_TYPE_PATHS.firstNotNullOfOrNull { readSysfsLine(it) } ?: "n/a"
             XposedBridge.log(
-                "3IN1: charge protocol=$protocol negotiated=${negotiatedVoltageMv}mV/${negotiatedCurrentMa}mA " +
+                "3IN1: charge protocol=$protocol (sysfs=$sysfs node=[tech=$tech type=$type]) " +
+                    "negotiated=${negotiatedVoltageMv}mV/${negotiatedCurrentMa}mA " +
                     "oplus=[fastType=$oplusFastType ppsMode=$oplusPpsMode tech=$oplusChargeTechnology " +
                     "plugged=$oplusChargePlugged fast=$oplusFastCharger v=${oplusChargerVoltageMv}mV w=${oplusWatts}] " +
-                    "battery=[usbFastChgType=$batteryFastChgType chgTech=$chargerTechnologyLevel " +
-                    "chgV=${oplusChargerVoltageMv}mV]"
+                    "battery=[fastChgType=$batteryFastChgType chgTech=$chargerTechnologyLevel " +
+                    "chgV=${oplusChargerVoltageMv}mV ppsIng=$ppsChgIng maxV=${negotiatedVoltageMv}mV]"
             )
+            lastSysfsProtocol = sysfs
         }
         current = current.copy(chargeProtocol = protocol, chargeWatts = oplusWatts)
     }
@@ -209,6 +289,8 @@ class SystemStateSource(
         // third-party one that happens to speak UFCS as well.
         runCatching { queryGuardElf(TRANSACTION_GET_CHARGER_TECHNOLOGY) }.getOrNull()
             ?.let { if (it >= 0) chargerTechnologyLevel = it }
+        runCatching { queryGuardElf(TRANSACTION_GET_BATT_PPS_CHG_ING) }.getOrNull()
+            ?.let { if (it >= 0) ppsChgIng = it }
         runCatching { queryGuardElf(TRANSACTION_GET_BATT_PPS_CHG_POWER) }.getOrNull()
             ?.let {
                 if (it >= 0) {
@@ -290,8 +372,14 @@ class SystemStateSource(
         private var lastRx = -1L
         private var lastTx = -1L
         private var tick = 0
-        override fun run() {
+            override fun run() {
             if (!running) return
+            // While charging, re-read the Oplus driver node so the colour follows the
+            // negotiated protocol even if no battery broadcast fires mid-negotiation.
+            if (current.batteryPhase in setOf(BatteryPhase.CHARGING, BatteryPhase.FULL)) {
+                refreshChargerTelemetry()
+                applyProtocol()
+            }
             val rx = TrafficStats.getTotalRxBytes()
             val tx = TrafficStats.getTotalTxBytes()
             val traffic = if (lastRx >= 0 && lastTx >= 0) {
@@ -511,7 +599,16 @@ class SystemStateSource(
     private fun buildCurrent() {
         refreshSubscriptions()
         val wifiEnabled = wifi?.isWifiEnabled == true
-        val wifiConnected = wifiCaps != null
+        // Derive the Wi-Fi connection from the active network rather than the sticky
+        // TRANSPORT_WIFI callback value. The callback value can lag when the device
+        // switches to mobile data and leave `wifiCaps` set, which made the indicator
+        // paint a grey Wi-Fi fan instead of the 5G/4G label.
+        val activeCaps = runCatching {
+            connectivity.activeNetwork?.let { connectivity.getNetworkCapabilities(it) }
+        }.getOrNull()
+        val wifiActive = activeCaps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        val wifiConnected = wifiActive
+        val wifiCaps = if (wifiActive) activeCaps else null
         val wifiPhase = WifiStatus.phase(wifiEnabled, false, wifiConnected, wifiCaps)
         val rssi = wifi?.connectionInfo?.rssi ?: -200
         val wifiLevel = if (wifiConnected) {
@@ -616,6 +713,16 @@ class SystemStateSource(
          */
         const val FAST_CHARGE_VOLTAGE_MV = 9000
 
+        /**
+         * The voltage from which on the charger is treated as speaking UFCS rather
+         * than PPS.
+         *
+         * PPS negotiates in 9 V steps and stays at or below 9 V in practice, while
+         * UFCS goes up to 10 V and beyond. The firmware reports the same charge type
+         * for both, so the negotiated voltage is the only thing that separates them.
+         */
+        const val UFCS_HIGH_VOLTAGE_MV = 10000
+
         /** The `guardelfthermalcontrol` service that exposes the charger state. */
         const val SERVICE_GUARD_ELF_THERMAL = "guardelfthermalcontrol"
 
@@ -628,8 +735,16 @@ class SystemStateSource(
         /** Transaction code of `getBattPPSChgPower()`, the negotiated power in watts. */
         const val TRANSACTION_GET_BATT_PPS_CHG_POWER = 22
 
-        /** Transaction code of `getChargerTechnology()`, the charger capability level. */
-        const val TRANSACTION_GET_CHARGER_TECHNOLOGY = 28
+        /** Transaction code of `getBattPPSChgIng()`, the PPS protocol flag. */
+        const val TRANSACTION_GET_BATT_PPS_CHG_ING = 21
+
+        /**
+         * Transaction code of `getChargerTechnology()`, the charger capability level.
+         *
+         * The charging IC reports what the plugged-in charger can do: the original
+         * OnePlus charger reaches the VOOC level, a plain USB charger stays at 0.
+         */
+        const val TRANSACTION_GET_CHARGER_TECHNOLOGY = 7
 
         /**
          * Maps the charging telemetry onto a protocol.
@@ -657,23 +772,34 @@ class SystemStateSource(
             chargerVoltageMv: Int,
             charging: Boolean
         ): ChargeProtocol {
+            // A charger that is not charging negotiates nothing, so the colour stays
+            // neutral — the driver node can hold a stale value while idle. The power
+            // alone cannot decide either: a full battery draws none, even on the
+            // original charger.
+            if (!charging) return ChargeProtocol.NONE
             // The original OnePlus charger: the charging IC reports the proprietary
             // VOOC capability. This is what tells it apart from a third-party charger
             // that speaks the public UFCS standard — the original charger speaks both,
             // and UFCS alone therefore says nothing about who plugged it in.
             if (chargeTechnology >= CHARGER_TECHNOLOGY_VOOC) return ChargeProtocol.SUPER_VOOC
-            // A charger that is plugged in but not charging negotiates nothing and keeps
-            // its last protocol, so the charging state decides first. The power alone
-            // cannot: a full battery draws none, even on the original charger.
-            if (!charging) return ChargeProtocol.NONE
             // The charge type alone does not identify a fast charger: the firmware
             // reports UFCS for a plain USB port as well — a power strip's port for
             // instance. What separates them is the voltage the charger actually
             // delivers: a fast charger pushes the rail to 9 V and beyond, a plain USB
             // port stays at 5 V.
             if (chargerVoltageMv >= FAST_CHARGE_VOLTAGE_MV) {
+                // PPS negotiates in 9 V steps and tops out well below the proprietary
+                // rail, while UFCS reaches the higher voltages. The firmware reports
+                // the same charge type for both, so the voltage is what tells them
+                // apart.
                 if (chargeTech == FAST_CHG_TYPE_PPS) return ChargeProtocol.PPS
-                if (chargeTech == CHARGE_TECH_UFCS) return ChargeProtocol.UFCS
+                if (chargeTech == CHARGE_TECH_UFCS) {
+                    return if (chargerVoltageMv < UFCS_HIGH_VOLTAGE_MV) {
+                        ChargeProtocol.PPS
+                    } else {
+                        ChargeProtocol.UFCS
+                    }
+                }
                 if (chargeTech == FAST_CHG_TYPE_VOOC) return ChargeProtocol.SUPER_VOOC
             }
             if (fastType > 0) return ChargeProtocol.SUPER_VOOC
