@@ -751,7 +751,7 @@ class ColorOsAdapter(private val loader: ClassLoader) {
             !config.enabled -> "模块已加载；替换开关关闭"
             sessions.isEmpty() -> "模块已加载；等待状态栏电池视图"
             !state.ready -> "模块已加载；等待完整系统状态"
-            sessions.values.any { it.active } -> "替换已运行"
+            sessions.values.any { it.active } -> "模块已运行"
             else -> "模块已加载；当前显示位置未启用"
         }
         XposedBridge.log("3IN1: $text; revision=$revision; hosts=${sessions.size}")

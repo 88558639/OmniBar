@@ -412,12 +412,14 @@ class RenderingTest {
             root.layout(0, 0, width, height)
             val views = descendants(root)
             // The settings page was reduced to switches and colour swatches: every
-            // slider is gone, so nothing can be dragged any more. The master switch
-            // is gone as well — only the two colour toggles are left.
+            // slider is gone, so nothing can be dragged any more. The switches went
+            // with them — the page carries no on/off control at all.
             assertEquals(0, views.count { it is SeekBar })
-            assertEquals(2, views.count { it is CardSwitch })
+            assertEquals(0, views.count { it is CardSwitch })
             assertEquals(0, views.count { it is Switch })
             assertFalse(views.filterIsInstance<TextView>().any { it.text.toString().contains("启用三合一") })
+            // The diagnostics panel is gone as well.
+            assertFalse(views.filterIsInstance<TextView>().any { it.text.toString().contains("适配诊断") })
             // The preview state is picked with chips instead of a spinner.
             val chips = views.filterIsInstance<TextView>()
                 .filter { it.text.toString() in IndicatorState.previews.map { it.first } }

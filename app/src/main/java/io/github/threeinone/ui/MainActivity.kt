@@ -3,7 +3,6 @@ package io.github.threeinone.ui
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.*
-import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
@@ -17,8 +16,6 @@ import io.github.threeinone.config.IndicatorConfig
 import io.github.threeinone.config.PreferenceMigration
 import io.github.threeinone.model.IndicatorState
 import io.github.threeinone.render.IndicatorView
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -39,9 +36,6 @@ class MainActivity : Activity() {
     private lateinit var large: IndicatorView
     private lateinit var statusDot: StatusDot
     private lateinit var statusLabel: TextView
-    private lateinit var statusTime: TextView
-    private lateinit var saveLabel: TextView
-    private lateinit var diagnostic: TextView
     private val handler = Handler(Looper.getMainLooper())
     private val writer = Executors.newSingleThreadExecutor()
     private var previewIndex = 0
@@ -53,8 +47,10 @@ class MainActivity : Activity() {
             val success = prefs.edit().putLong("revision", revision).commit()
             handler.post {
                 if (isDestroyed) return@post
-                saveLabel.text = if (success) "已保存 · 等待 SystemUI 回执" else "保存失败，请重试"
+                // The status card stays quiet about saving; a failure is worth a
+                // toast, a success is not worth any text at all.
                 if (success) probe()
+                else Toast.makeText(this, "保存失败，请重试", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -67,11 +63,20 @@ class MainActivity : Activity() {
         PreferenceMigration.importOnce(prefs,
             java.io.File(applicationInfo.dataDir, "shared_prefs/${IndicatorConfig.FILE}.xml"))
         val normalized = IndicatorConfig.normalizeNumberMode(prefs)
-        // The master switch is gone: whether the stock icons are replaced now follows
-        // the module itself, so the app publishes the replacement as enabled. The only
-        // way to stop it is to disable the module in LSPosed.
-        val published = !prefs.getBoolean("enabled", false)
-        if (published) prefs.edit().putBoolean("enabled", true).commit()
+        // The switches are gone: whether the stock icons are replaced and how the module
+        // colours them now follow the module itself, so the app publishes them as
+        // enabled. The only way to stop the replacement is to disable the module in
+        // LSPosed.
+        val published = !prefs.getBoolean("enabled", false) ||
+            !prefs.getBoolean("colors", true) ||
+            !prefs.getBoolean("chargeColorAuto", true)
+        if (published) {
+            prefs.edit()
+                .putBoolean("enabled", true)
+                .putBoolean("colors", true)
+                .putBoolean("chargeColorAuto", true)
+                .commit()
+        }
         previewIndex = bundle?.getInt("preview", 0)?.coerceIn(IndicatorState.previews.indices) ?: 0
         buildPage()
         if (normalized || published) scheduleSave()
@@ -168,14 +173,11 @@ class MainActivity : Activity() {
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         }
         head.addView(statusLabel, LinearLayout.LayoutParams(0, -2, 1f))
-        statusTime = label("", 12f, palette.muted)
-        head.addView(statusTime)
         card.addView(head, LinearLayout.LayoutParams(-1, -2))
 
         // There is no master switch any more: the replacement follows the module, so
         // the only way back to the stock icons is LSPosed.
-        card.addView(label("替换由 LSPosed 模块开关控制，停用本模块并重启 SystemUI 即恢复原生图标。",
-            12f, palette.muted).apply {
+        card.addView(label("如需恢复系统默认图标，请至LSPosed关闭并重启手机", 12f, palette.muted).apply {
             setPadding(0, dp(6), 0, 0)
             setLineSpacing(dp(2).toFloat(), 1f)
         }, LinearLayout.LayoutParams(-1, -2))
@@ -232,14 +234,11 @@ class MainActivity : Activity() {
         }
         chips.addView(chipRow, LinearLayout.LayoutParams(-2, dp(42)))
         card.addView(chips, LinearLayout.LayoutParams(-1, dp(42)))
-
-        saveLabel = label("", 12f, palette.muted)
-        card.addView(saveLabel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
     }
 
     private fun buildGroups() {
         section("状态颜色").apply {
-            switchRow("启用状态颜色", "按电量与省电状态自动着色", "colors", true)
+            textRow("启用状态颜色", "按电量与省电状态自动着色")
             colorRow("低电量", "lowColor", 0xFFE7433A.toInt())
             colorRow("严重电量", "criticalColor", 0xFFD50000.toInt())
             colorRow("省电模式", "saverColor", 0xFFFFB300.toInt())
@@ -248,7 +247,7 @@ class MainActivity : Activity() {
         }
 
         section("充电配色").apply {
-            switchRow("按充电协议自动配色", "关闭后统一使用普通 / 慢充的橙色", "chargeColorAuto", true)
+            textRow("按充电协议自动配色", null)
             colorRow("原装充电器 · 紫", "voocColor", 0xFF9C6BFF.toInt())
             colorRow("第三方 UFCS · 绿", "ufcsColor", 0xFF2ECC71.toInt())
             colorRow("PPS 充电器 · 蓝", "ppsColor", 0xFF3B82F6.toInt())
@@ -256,17 +255,6 @@ class MainActivity : Activity() {
             hint("自动模式按充电协议上色：原装一加充电器紫、第三方 UFCS 绿、PPS 蓝、" +
                 "普通与慢充橙。原装识别依据充电合同的最大功率 120W —— 原装头协商到该上限，" +
                 "第三方充电器通常只有 30W 上下。")
-        }
-
-        section("适配诊断").apply {
-            val row = LinearLayout(this@MainActivity).apply { gravity = Gravity.CENTER_VERTICAL }
-            diagnostic = label("尚未收到 SystemUI 回执", 13f, palette.muted).apply {
-                setTextIsSelectable(true)
-                setLineSpacing(dp(3).toFloat(), 1f)
-            }
-            row.addView(diagnostic, LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(iconButton(android.R.drawable.ic_popup_sync, "刷新诊断") { probe() })
-            addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
         }
     }
 
@@ -335,12 +323,13 @@ class MainActivity : Activity() {
         )
     }
 
-    private fun LinearLayout.switchRow(
-        title: String,
-        subtitle: String?,
-        key: String,
-        default: Boolean
-    ) {
+    /**
+     * A row that only states what the module does.
+     *
+     * The switches are gone from the page, so the rows that used to carry one stay
+     * behind as plain text.
+     */
+    private fun LinearLayout.textRow(title: String, subtitle: String?) {
         rowSeparator()
         val row = LinearLayout(this@MainActivity).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -355,15 +344,6 @@ class MainActivity : Activity() {
             })
         }
         row.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
-
-        val widget = CardSwitch(this@MainActivity).apply {
-            setCheckedSilently(prefs.getBoolean(key, default))
-            contentDescription = title
-        }
-        widget.onCheckedChange = { checked: Boolean ->
-            prefs.edit().putBoolean(key, checked).apply(); scheduleSave()
-        }
-        row.addView(widget, LinearLayout.LayoutParams(dp(52), dp(32)))
         addView(row, LinearLayout.LayoutParams(-1, -2))
     }
 
@@ -461,7 +441,6 @@ class MainActivity : Activity() {
 
     private fun scheduleSave() {
         updatePreview()
-        if (::saveLabel.isInitialized) saveLabel.text = "正在保存…"
         handler.removeCallbacks(sync); handler.postDelayed(sync, 180)
     }
 
@@ -475,6 +454,12 @@ class MainActivity : Activity() {
         handler.postDelayed({ if (!isDestroyed) updateDiagnostics() }, 2000)
     }
 
+    /**
+     * Mirrors the module's report on the status card.
+     *
+     * The page carries no diagnostics panel any more, so the one line in the status
+     * card is the only thing that is updated here.
+     */
     private fun updateDiagnostics() {
         val p = getSharedPreferences("diagnostics", MODE_PRIVATE)
         // The provider keeps the latest receipt under the probe keys; the plain
@@ -482,52 +467,25 @@ class MainActivity : Activity() {
         // still hold a fault from days ago. Never show those as if they were
         // the current state.
         val probeStatus = p.getString(IndicatorConfig.PROBE_STATUS, "") ?: ""
-        val probeTime = p.getLong(IndicatorConfig.PROBE_TIME, 0)
         val legacyStatus = p.getString("status", "") ?: ""
-        val legacyTime = p.getLong("time", 0)
         val matchedProbe = lastProbeToken != null &&
             p.getString(IndicatorConfig.PROBE_TOKEN, null) == lastProbeToken
         val status = when {
             matchedProbe || probeStatus.isNotEmpty() -> probeStatus
             else -> legacyStatus
         }
-        val timestamp = when {
-            matchedProbe || probeTime > 0 -> probeTime
-            else -> legacyTime
-        }
-        val revision = p.getLong(IndicatorConfig.PROBE_REVISION, -1)
-        val stamp = if (timestamp > 0) SimpleDateFormat("MM-dd HH:mm:ss", Locale.CHINA).format(Date(timestamp)) else ""
-        diagnostic.text = when {
-            matchedProbe -> "$status\n$stamp"
-            status.isNotEmpty() -> "本次未收到回执，显示上次回执：\n$status\n$stamp"
-            else -> "未收到 SystemUI 回执，请检查 LSPosed 作用域及 SystemUI 是否已重启"
-        }
-        val received = matchedProbe && revision == prefs.getLong("revision", 0)
-
-        // The hero card mirrors the same report.
-        val live = status.ifEmpty { "尚未收到 SystemUI 回执" }
-        statusLabel.text = live
-        statusTime.text = stamp
+        statusLabel.text = status.ifEmpty { "尚未收到 SystemUI 回执" }
         statusDot.color = when {
-            status.contains("替换已运行") -> palette.accent
+            // The module reports "模块已运行"; the older wording still shows up while
+            // SystemUI runs a previous build of the module.
+            status.contains("模块已运行") || status.contains("替换已运行") -> palette.accent
             status.contains("回退") -> palette.danger
             status.isEmpty() -> palette.muted
             else -> palette.surfaceAlt
         }
-        saveLabel.text = if (received) "已保存 · SystemUI 已接收" else "已保存 · 系统尚未确认"
     }
 
     // ------------------------------------------------------------------ small helpers
-
-    private fun iconButton(icon: Int, title: String, action: () -> Unit) = ImageButton(this).apply {
-        setImageResource(icon)
-        imageTintList = ColorStateList.valueOf(palette.accent)
-        background = rounded(palette.surface, 14f, palette.stroke)
-        contentDescription = title
-        tooltipText = title
-        setPadding(dp(10), dp(10), dp(10), dp(10))
-        setOnClickListener { action() }
-    }
 
     private fun label(text: String, size: Float, color: Int = palette.ink) =
         Label(this, text, size, color)

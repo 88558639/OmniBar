@@ -49,9 +49,9 @@ class ChargingMarkerTest {
             // so the page no longer offers an "enable" switch at all.
             assertFalse(labels.any { it.contains("启用三合一") })
             assertEquals(0, views.count { it.contentDescription == "启用三合一" })
-            // Every switch on the page is one of the hand-drawn card switches; the
-            // platform widget is gone for good. Only the two colour toggles are left.
-            assertEquals(2, views.count { it is CardSwitch })
+            // Every switch on the page is gone for good — the two colour toggles went
+            // with them. Only the platform widget was ever a risk, and it stays away.
+            assertEquals(0, views.count { it is CardSwitch })
             assertEquals(0, views.count { it is Switch })
             assertFalse(prefs.getBoolean("autoNumber", true))
             assertEquals(30, prefs.getInt("numberThreshold", 0))
@@ -59,6 +59,8 @@ class ChargingMarkerTest {
             // …and the replacement is published as enabled, so a fresh install works
             // without an in-app switch.
             assertTrue(prefs.getBoolean("enabled", false))
+            assertTrue(prefs.getBoolean("colors", false))
+            assertTrue(prefs.getBoolean("chargeColorAuto", false))
         } finally { controller.pause().stop().destroy() }
     }
 
