@@ -748,6 +748,10 @@ class ColorOsAdapter(private val loader: ClassLoader) {
                         putLong("revision", revision)
                         if (!probeToken.isNullOrBlank()) putString(IndicatorConfig.PROBE_TOKEN, probeToken)
                     })
+            }.onFailure {
+                // A swallowed failure here leaves the settings screen showing a stale
+                // receipt, so the reason has to reach the log.
+                XposedBridge.log("3IN1: report failed: $it")
             }
         }
     }

@@ -20,7 +20,10 @@ class DiagnosticsProvider : ContentProvider() {
 
     private fun allowed(): Boolean {
         val uid = Binder.getCallingUid()
-        return uid == 0 || uid == 1000 || uid == 2000 || uid == Process.myUid()
+        val packages = runCatching {
+            context?.packageManager?.getPackagesForUid(uid).orEmpty().toList()
+        }.getOrDefault(emptyList())
+        return allowedCaller(uid, packages, Process.myUid())
     }
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
@@ -77,3 +80,16 @@ class DiagnosticsProvider : ContentProvider() {
         uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?
     ): Int = 0
 }
+
+/** The package that hosts the status bar and therefore the module. */
+internal const val SYSTEMUI_PACKAGE = "com.android.systemui"
+
+/**
+ * Whether a caller may publish a run-state receipt.
+ *
+ * The SystemUI process is the only writer besides the shell and the app itself. It cannot be
+ * recognised by a fixed UID: ColorOS 17 runs it under its own shared UID (10248) while older
+ * builds use the platform's 1000, so the package name is the reliable marker.
+ */
+internal fun allowedCaller(uid: Int, packages: Collection<String>, ownUid: Int): Boolean =
+    uid == 0 || uid == 2000 || uid == 1000 || uid == ownUid || packages.contains(SYSTEMUI_PACKAGE)

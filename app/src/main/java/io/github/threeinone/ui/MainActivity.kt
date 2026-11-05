@@ -7,48 +7,53 @@ import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.*
+import android.text.InputType
 import android.view.*
 import android.widget.*
+import io.github.threeinone.R
 import io.github.threeinone.config.IndicatorConfig
 import io.github.threeinone.config.PreferenceMigration
 import io.github.threeinone.model.IndicatorState
 import io.github.threeinone.render.IndicatorView
-import io.github.threeinone.R
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.Executors
 
+/**
+ * The settings screen.
+ *
+ * The layout is built in code — the app ships without a third-party UI dependency — on
+ * top of a small design system ([Palette], [CardSwitch]). The screen is a column of
+ * cards: a live status card on top, then one card per group of settings.
+ */
 class MainActivity : Activity() {
     private lateinit var prefs: SharedPreferences
+    private lateinit var palette: Palette
     private lateinit var root: LinearLayout
-    private lateinit var controls: LinearLayout
+    private lateinit var content: LinearLayout
     private lateinit var small: IndicatorView
     private lateinit var large: IndicatorView
+    private lateinit var statusDot: StatusDot
+    private lateinit var statusLabel: TextView
+    private lateinit var statusTime: TextView
+    private lateinit var saveLabel: TextView
     private lateinit var diagnostic: TextView
-    private lateinit var saved: TextView
     private val handler = Handler(Looper.getMainLooper())
     private val writer = Executors.newSingleThreadExecutor()
     private var previewIndex = 0
     private var lastProbeToken: String? = null
-    private val numberSwitches = mutableMapOf<String, Switch>()
-    private var updatingNumberSwitches = false
-    private val dark get() = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
-    private val ink get() = if (dark) Color.rgb(241, 244, 245) else Color.rgb(25, 31, 33)
-    private val muted get() = if (dark) Color.rgb(160, 173, 178) else Color.rgb(94, 109, 115)
-    private val accent get() = if (dark) Color.rgb(99, 215, 196) else Color.rgb(0, 127, 112)
-    private val background get() = if (dark) Color.rgb(21, 23, 25) else Color.WHITE
+
     private val sync = Runnable {
         val revision = System.currentTimeMillis()
         writer.execute {
             val success = prefs.edit().putLong("revision", revision).commit()
             handler.post {
                 if (isDestroyed) return@post
-                saved.text = if (success) "设置已保存 · 等待系统回执" else "保存失败，请重试"
+                saveLabel.text = if (success) "已保存 · 等待 SystemUI 回执" else "保存失败，请重试"
                 if (success) probe()
             }
         }
@@ -87,147 +92,401 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
+    // ------------------------------------------------------------------ page
+
     private fun buildPage() {
-        numberSwitches.clear()
+        palette = Palette(this)
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(this@MainActivity.background)
-            setPadding(dp(20), 0, dp(20), 0)
+            setBackgroundColor(palette.background)
         }
         root.setOnApplyWindowInsetsListener { view, insets ->
             val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
-            view.setPadding(dp(20) + bars.left, bars.top, dp(20) + bars.right, bars.bottom)
+            view.setPadding(dp(16) + bars.left, bars.top, dp(16) + bars.right, bars.bottom)
             insets
         }
         setContentView(root)
-        val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        header.addView(ImageView(this).apply {
+        root.addView(buildTopBar())
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+        }
+        content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(4), 0, dp(28))
+        }
+        scroll.addView(content)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        buildHero()
+        buildGroups()
+        buildFooter()
+        updatePreview()
+    }
+
+    private fun buildTopBar(): View {
+        val bar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        bar.addView(ImageView(this).apply {
             setImageResource(R.mipmap.ic_launcher)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }, LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginEnd = dp(10) })
-        header.addView(label("3IN1", 26f).apply {
+            background = rounded(palette.surface, 12f, palette.stroke)
+            setPadding(dp(3), dp(3), dp(3), dp(3))
+        }, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginEnd = dp(12) })
+
+        val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        titles.addView(label("3IN1", 22f).apply {
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            gravity = Gravity.CENTER_VERTICAL
-        },
-            LinearLayout.LayoutParams(0, dp(58), 1f))
-        header.addView(iconButton(android.R.drawable.ic_menu_revert, "恢复默认") {
+        })
+        titles.addView(label("状态栏三合一 · ColorOS 17", 12f, palette.muted))
+        bar.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
+
+        bar.addView(iconButton(android.R.drawable.ic_menu_revert, "恢复默认设置") {
             AlertDialog.Builder(this).setTitle("恢复默认设置？")
-                .setMessage("恢复全部外观参数并关闭系统替换。")
+                .setMessage("恢复全部外观参数并关闭系统图标替换。")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("恢复") { _, _ ->
                     prefs.edit().clear().putBoolean(PreferenceMigration.MARKER, true).apply()
                     buildPage(); scheduleSave()
                 }.show()
         })
-        root.addView(header)
-
-        val previews = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        val natural = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-            setPadding(dp(8), dp(12), dp(8), dp(12))
+        return bar.apply {
+            layoutParams = LinearLayout.LayoutParams(-1, dp(62))
+            setPadding(0, dp(8), 0, dp(8))
         }
-        val actualFrame = FrameLayout(this)
-        small = IndicatorView(this).apply { tint = ink; alignInStatusBar = false }
-        actualFrame.addView(small, FrameLayout.LayoutParams(dp(22), dp(28), Gravity.CENTER))
-        natural.addView(actualFrame, LinearLayout.LayoutParams(-1, dp(76)))
-        natural.addView(label("实际尺寸", 12f, muted).apply { gravity = Gravity.CENTER })
-        previews.addView(natural, LinearLayout.LayoutParams(0, dp(130), 1f))
+    }
+
+    /** The live status card: whether the module is running, plus the two previews. */
+    private fun buildHero() {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(palette.surface, 20f, palette.stroke)
+            setPadding(dp(16), dp(16), dp(16), dp(14))
+        }
+        content.addView(card, LinearLayout.LayoutParams(-1, -2))
+
+        val head = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        statusDot = StatusDot(this)
+        head.addView(statusDot, LinearLayout.LayoutParams(dp(10), dp(10)).apply { marginEnd = dp(8) })
+        statusLabel = label("正在连接 SystemUI…", 14f, palette.ink).apply {
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        }
+        head.addView(statusLabel, LinearLayout.LayoutParams(0, -2, 1f))
+        statusTime = label("", 12f, palette.muted)
+        head.addView(statusTime)
+        card.addView(head, LinearLayout.LayoutParams(-1, -2))
+
+        // The two previews: the enlarged one on a dark backdrop, the real-size one on a
+        // light one, so both the shape and the true footprint are visible.
+        val previews = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(14), 0, dp(12))
+        }
         val enlarged = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-            background = shape(Color.rgb(21, 25, 27), 6f)
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = rounded(palette.previewBackdrop, 16f)
         }
         large = IndicatorView(this).apply { tint = Color.WHITE; alignInStatusBar = false }
-        enlarged.addView(large, LinearLayout.LayoutParams(dp(90), dp(104)))
-        enlarged.addView(label("放大预览", 12f, Color.rgb(181, 195, 200)).apply { gravity = Gravity.CENTER })
-        previews.addView(enlarged, LinearLayout.LayoutParams(0, dp(130), 1f))
-        root.addView(previews)
+        enlarged.addView(large, LinearLayout.LayoutParams(dp(84), dp(96)))
+        enlarged.addView(label("放大预览", 12f, palette.muted).apply { gravity = Gravity.CENTER })
+        previews.addView(enlarged, LinearLayout.LayoutParams(0, dp(132), 1.15f).apply { marginEnd = dp(10) })
 
-        val spinner = Spinner(this).apply {
-            contentDescription = "预览状态"
-            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
-                IndicatorState.previews.map { it.first })
-            setSelection(previewIndex)
-            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                    previewIndex = position; updatePreview()
+        val natural = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = rounded(palette.surfaceAlt, 16f)
+        }
+        small = IndicatorView(this).apply { tint = palette.ink; alignInStatusBar = false }
+        natural.addView(small, LinearLayout.LayoutParams(dp(24), dp(30)))
+        natural.addView(label("实际尺寸", 12f, palette.muted).apply { gravity = Gravity.CENTER })
+        previews.addView(natural, LinearLayout.LayoutParams(0, dp(132), 1f))
+        card.addView(previews, LinearLayout.LayoutParams(-1, -2))
+
+        card.addView(label("预览状态", 12f, palette.muted).apply { setPadding(0, 0, 0, dp(8)) })
+        val chips = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+        }
+        val chipRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        IndicatorState.previews.forEachIndexed { index, (name, _) ->
+            chipRow.addView(chip(name, index == previewIndex, palette).apply {
+                setOnClickListener {
+                    previewIndex = index
+                    for (i in 0 until chipRow.childCount) {
+                        val child = chipRow.getChildAt(i) as TextView
+                        val on = i == index
+                        child.setTextColor(if (on) palette.onAccent else palette.muted)
+                        child.background = if (on) pill(palette.accent) else pill(palette.surfaceAlt, palette.stroke)
+                    }
+                    updatePreview()
                 }
-                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-            }
+            }, LinearLayout.LayoutParams(-2, dp(34)).apply {
+                marginEnd = dp(8)
+                topMargin = dp(4)
+            })
         }
-        root.addView(spinner, LinearLayout.LayoutParams(-1, dp(44)))
-        saved = label("本机设置", 12f, muted)
-        root.addView(saved, LinearLayout.LayoutParams(-1, dp(24)))
-        val scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
-        controls = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(0, dp(8), 0, dp(24))
-        }
-        scroll.addView(controls)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        section("系统显示")
-        toggle("启用三合一", "enabled", false, confirm = true)
-        toggle("锁屏显示三合一", "lockscreen", true)
-        toggle("显示 VPN 标记", "showVpn", true)
-        toggle("反向布局（侧边徽标）", "swap", false)
-        section("尺寸与位置")
-        slider("整体图标尺寸", "size", 16, 32, 22, "dp")
-        slider("中间 Wi-Fi 大小", "wifiScale", 70, 150, 115, "%")
-        slider("网络类型文字大小", "textScale", 80, 250, 150, "%")
-        slider("图标粗细", "stroke", 60, 160, 120, "%")
-        slider("信号点大小", "dotScale", 60, 140, 100, "%")
-        slider("信号点间距", "dotSpacing", 70, 125, 100, "%")
-        slider("水平留白", "horizontalPadding", 0, 8, 2, "dp")
-        slider("垂直偏移", "verticalOffset", -4, 4, 0, "dp")
-        section("状态颜色")
-        toggle("启用状态颜色", "colors", true)
-        colorRow("低电量", "lowColor", 0xFFE7433A.toInt())
-        colorRow("严重电量", "criticalColor", 0xFFD50000.toInt())
-        colorRow("省电模式", "saverColor", 0xFFFFB300.toInt())
-        colorRow("漫游颜色", "roamingColor", 0xFF2F80ED.toInt())
-        slider("低电量阈值", "lowThreshold", 5, 50, 20, "%")
-        slider("严重电量阈值", "criticalThreshold", 1, 20, 10, "%")
-        section("充电配色")
-        toggle("按充电协议自动配色", "chargeColorAuto", true)
-        colorRow("原装充电器 · 紫", "voocColor", 0xFF9C6BFF.toInt())
-        colorRow("第三方 UFCS · 绿", "ufcsColor", 0xFF2ECC71.toInt())
-        colorRow("PPS 充电器 · 蓝", "ppsColor", 0xFF3B82F6.toInt())
-        colorRow("普通 / 慢充 · 橙", "unknownColor", 0xFFF97316.toInt())
-        colorRow("自定义充电色", "chargingColor", 0xFF1CB753.toInt())
-        section("蜂窝增强")
-        toggle("显示副卡信号（右列）", "dualSim", true)
-        toggle("显示上下行活动箭头", "showActivity", false)
-        section("电量数字")
-        slider("电量数字大小", "numberScale", 60, 140, 115, "%")
-        section("适配诊断")
-        val diagnosticsRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        diagnostic = label("尚未收到 SystemUI 回执", 13f, muted).apply { setTextIsSelectable(true) }
-        diagnosticsRow.addView(diagnostic, LinearLayout.LayoutParams(0, -2, 1f))
-        diagnosticsRow.addView(iconButton(android.R.drawable.ic_popup_sync, "刷新诊断") { probe() })
-        controls.addView(diagnosticsRow)
-        val recovery = Button(this).apply {
-            text = "恢复原图标"
-            setOnClickListener { prefs.edit().putBoolean("enabled", false).apply(); buildPage(); scheduleSave() }
-        }
-        controls.addView(recovery, LinearLayout.LayoutParams(-1, dp(52)))
-        controls.addView(Button(this).apply {
-            text = "关于"
-            setOnClickListener {
-                val version = packageManager.getPackageInfo(packageName, 0).versionName
-                AlertDialog.Builder(this@MainActivity)
-                    .setTitle("关于 3IN1")
-                    .setIcon(R.mipmap.ic_launcher)
-                    .setMessage("版本 $version")
-                    .setNegativeButton("关闭", null)
-                    .setPositiveButton("作者主页") { _, _ ->
-                        try {
-                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.coolapk.com/u/17348848")))
-                        } catch (_: ActivityNotFoundException) {
-                            Toast.makeText(this@MainActivity, "未找到可打开链接的应用", Toast.LENGTH_SHORT).show()
-                        }
-                    }.show()
-            }
-        }, LinearLayout.LayoutParams(-1, dp(52)))
-        updatePreview()
+        chips.addView(chipRow, LinearLayout.LayoutParams(-2, dp(42)))
+        card.addView(chips, LinearLayout.LayoutParams(-1, dp(42)))
+
+        saveLabel = label("", 12f, palette.muted)
+        card.addView(saveLabel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
     }
+
+    private fun buildGroups() {
+        section("系统显示").apply {
+            switchRow("启用三合一", "替换 ColorOS 状态栏的网络与电量图标", "enabled", false, confirm = true)
+            switchRow("锁屏显示三合一", "锁屏界面同样使用三合一图标", "lockscreen", true)
+            switchRow("显示 VPN 标记", "在蜂窝信号旁叠加 VPN 标识", "showVpn", true)
+            switchRow("反向布局（侧边徽标）", "将图标移到状态栏右侧", "swap", false)
+        }
+
+        section("状态颜色").apply {
+            switchRow("启用状态颜色", "按电量与省电状态自动着色", "colors", true)
+            colorRow("低电量", "lowColor", 0xFFE7433A.toInt())
+            colorRow("严重电量", "criticalColor", 0xFFD50000.toInt())
+            colorRow("省电模式", "saverColor", 0xFFFFB300.toInt())
+            colorRow("漫游颜色", "roamingColor", 0xFF2F80ED.toInt())
+            hint("低电量与严重电量的分界沿用上次保存的阈值（默认 20% 与 10%），" +
+                "颜色在左侧色块上点击即可修改。")
+        }
+
+        section("充电配色").apply {
+            switchRow("按充电协议自动配色", "关闭后统一使用下方自定义充电色", "chargeColorAuto", true)
+            colorRow("原装充电器 · 紫", "voocColor", 0xFF9C6BFF.toInt())
+            colorRow("第三方 UFCS · 绿", "ufcsColor", 0xFF2ECC71.toInt())
+            colorRow("PPS 充电器 · 蓝", "ppsColor", 0xFF3B82F6.toInt())
+            colorRow("普通 / 慢充 · 橙", "unknownColor", 0xFFF97316.toInt())
+            colorRow("自定义充电色", "chargingColor", 0xFF1CB753.toInt())
+            hint("自动模式按充电协议上色：原装一加充电器紫、第三方 UFCS 绿、PPS 蓝、" +
+                "普通与慢充橙。原装识别依据充电合同的最大功率 120W —— 原装头协商到该上限，" +
+                "第三方充电器通常只有 30W 上下。")
+        }
+
+        section("蜂窝与信号").apply {
+            switchRow("显示副卡信号（右列）", "同时显示第二张卡的信号强度", "dualSim", true)
+            switchRow("显示上下行活动箭头", "有数据流量时显示上下行箭头", "showActivity", false)
+        }
+
+        section("适配诊断").apply {
+            val row = LinearLayout(this@MainActivity).apply { gravity = Gravity.CENTER_VERTICAL }
+            diagnostic = label("尚未收到 SystemUI 回执", 13f, palette.muted).apply {
+                setTextIsSelectable(true)
+                setLineSpacing(dp(3).toFloat(), 1f)
+            }
+            row.addView(diagnostic, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(iconButton(android.R.drawable.ic_popup_sync, "刷新诊断") { probe() })
+            addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
+        }
+    }
+
+    private fun buildFooter() {
+        content.addView(
+            Button(this).apply {
+                text = "恢复原图标"
+                textSize = 15f
+                setTextColor(palette.ink)
+                background = rounded(palette.surface, 16f, palette.stroke)
+                isAllCaps = false
+                setOnClickListener {
+                    prefs.edit().putBoolean("enabled", false).apply(); buildPage(); scheduleSave()
+                }
+            },
+            LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(16) }
+        )
+        content.addView(
+            Button(this).apply {
+                text = "关于"
+                textSize = 15f
+                setTextColor(palette.ink)
+                background = rounded(palette.surface, 16f, palette.stroke)
+                isAllCaps = false
+                setOnClickListener {
+                    val version = packageManager.getPackageInfo(packageName, 0).versionName
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("关于 3IN1")
+                        .setIcon(R.mipmap.ic_launcher)
+                        .setMessage("版本 $version")
+                        .setNegativeButton("关闭", null)
+                        .setPositiveButton("作者主页") { _, _ ->
+                            try {
+                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.coolapk.com/u/17348848")))
+                            } catch (_: ActivityNotFoundException) {
+                                Toast.makeText(this@MainActivity, "未找到可打开链接的应用", Toast.LENGTH_SHORT).show()
+                            }
+                        }.show()
+                }
+            },
+            LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(10) }
+        )
+    }
+
+    // ------------------------------------------------------------------ building blocks
+
+    /** A section heading followed by an empty card; the rows are added to the card. */
+    private fun section(title: String): LinearLayout {
+        content.addView(label(title, 14f, palette.muted).apply {
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setPadding(dp(4), dp(0), dp(4), 0)
+        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(22) })
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(palette.surface, 18f, palette.stroke)
+            setPadding(dp(14), dp(4), dp(14), dp(4))
+        }
+        content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+        return card
+    }
+
+    /** An explanatory line inside a card. */
+    private fun LinearLayout.hint(text: String) {
+        addView(
+            Label(this@MainActivity, text, 12.5f, palette.muted).apply {
+                setLineSpacing(dp(3).toFloat(), 1f)
+                setPadding(0, dp(10), 0, dp(8))
+            },
+            LinearLayout.LayoutParams(-1, -2)
+        )
+    }
+
+    /** A hairline between two rows of a card. */
+    private fun LinearLayout.rowSeparator() {
+        if (childCount == 0) return
+        addView(
+            View(this@MainActivity).apply { setBackgroundColor(palette.stroke) },
+            LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(2); bottomMargin = dp(2) }
+        )
+    }
+
+    private fun LinearLayout.switchRow(
+        title: String,
+        subtitle: String?,
+        key: String,
+        default: Boolean,
+        confirm: Boolean = false
+    ) {
+        rowSeparator()
+        val row = LinearLayout(this@MainActivity).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(10), 0, dp(10))
+        }
+        val texts = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
+        texts.addView(label(title, 15.5f))
+        if (subtitle != null) {
+            texts.addView(label(subtitle, 12f, palette.muted).apply {
+                setPadding(0, dp(3), dp(12), 0)
+                setLineSpacing(dp(2).toFloat(), 1f)
+            })
+        }
+        row.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+
+        val widget = CardSwitch(this@MainActivity).apply {
+            setCheckedSilently(prefs.getBoolean(key, default))
+            contentDescription = title
+        }
+        widget.onCheckedChange = { checked: Boolean ->
+            when {
+                confirm && checked -> {
+                    // Roll the switch back and ask — the replacement is easy to misjudge.
+                    widget.setCheckedSilently(false)
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("启用系统图标替换？")
+                        .setMessage("已按 ColorOS 17 的 SuperIcon 契约实现。首次使用请确认：LSPosed 中已启用本模块、作用域包含 SystemUI，并已重启 SystemUI。异常时在 LSPosed 停用本模块并重启即可恢复。不会自动重启系统。")
+                        .setNegativeButton("取消", null)
+                        .setPositiveButton("启用") { _, _ ->
+                            widget.setCheckedSilently(true)
+                            prefs.edit().putBoolean(key, true).apply(); scheduleSave()
+                        }.show()
+                }
+                else -> {
+                    prefs.edit().putBoolean(key, checked).apply(); scheduleSave()
+                }
+            }
+        }
+        row.addView(widget, LinearLayout.LayoutParams(dp(52), dp(32)))
+        addView(row, LinearLayout.LayoutParams(-1, -2))
+    }
+
+    private fun LinearLayout.colorRow(title: String, key: String, default: Int) {
+        rowSeparator()
+        val row = LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(12), 0, dp(12))
+            isClickable = true
+            isFocusable = true
+            contentDescription = "$title 颜色"
+        }
+        val dot = ColorDot(this@MainActivity).apply { color = prefs.getInt(key, default) }
+        row.addView(dot, LinearLayout.LayoutParams(dp(26), dp(26)).apply { marginEnd = dp(12) })
+        row.addView(label(title, 15.5f), LinearLayout.LayoutParams(0, -2, 1f))
+        val hexLabel = Label(this@MainActivity, hex(prefs.getInt(key, default)), 12.5f, palette.muted).apply {
+            typeface = Typeface.MONOSPACE
+        }
+        row.addView(hexLabel)
+        row.setOnClickListener {
+            showColorDialog(title, key, default) { color ->
+                dot.color = color
+                hexLabel.text = hex(color)
+            }
+        }
+        addView(row, LinearLayout.LayoutParams(-1, -2))
+    }
+
+    private fun showColorDialog(title: String, key: String, default: Int, onPicked: (Int) -> Unit) {
+        val input = EditText(this).apply {
+            setSingleLine()
+            setText(hex(prefs.getInt(key, default)))
+            selectAll()
+            contentDescription = "十六进制颜色"
+            inputType = InputType.TYPE_CLASS_TEXT
+            setTextColor(palette.ink)
+            setHintTextColor(palette.muted)
+        }
+        val holder = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), 0, dp(20), dp(12))
+            addView(input)
+        }
+        val paletteRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(12), 0, 0)
+        }
+        listOf(
+            0xFF9C6BFF.toInt(), 0xFF2ECC71.toInt(), 0xFF3B82F6.toInt(), 0xFFF97316.toInt(),
+            0xFF1CB753.toInt(), 0xFFE7433A.toInt(), 0xFFFFB300.toInt(), 0xFF007F70.toInt()
+        ).forEach { entry ->
+            paletteRow.addView(ColorDot(this).apply {
+                color = entry
+                contentDescription = hex(entry)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { input.setText(hex(entry)) }
+            }, LinearLayout.LayoutParams(0, dp(34), 1f).apply {
+                setMargins(dp(2), 0, dp(2), 0)
+            })
+        }
+        holder.addView(paletteRow)
+
+        val dialog = AlertDialog.Builder(this).setTitle(title).setView(holder)
+            .setNegativeButton("取消", null).setPositiveButton("保存", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val raw = input.text.toString().trim()
+                if (!Regex("#[0-9a-fA-F]{6}").matches(raw)) input.error = "请输入 #RRGGBB"
+                else {
+                    val next = Color.parseColor(raw)
+                    prefs.edit().putInt(key, next).apply()
+                    onPicked(next)
+                    scheduleSave(); dialog.dismiss()
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    // ------------------------------------------------------------------ state
 
     private fun updatePreview() {
         if (!::small.isInitialized) return
@@ -235,13 +494,15 @@ class MainActivity : Activity() {
         small.config = c; large.config = c
         val state = IndicatorState.previews[previewIndex].second
         small.state = state; large.state = state
-        small.layoutParams = FrameLayout.LayoutParams(dp(c.size), dp(c.size), Gravity.CENTER)
+        small.layoutParams = LinearLayout.LayoutParams(dp(c.size), dp(c.size)).apply {
+            gravity = Gravity.CENTER
+        }
         small.translationY = dp(c.verticalOffset).toFloat()
     }
 
     private fun scheduleSave() {
         updatePreview()
-        saved.text = "正在保存"
+        if (::saveLabel.isInitialized) saveLabel.text = "正在保存…"
         handler.removeCallbacks(sync); handler.postDelayed(sync, 180)
     }
 
@@ -257,154 +518,76 @@ class MainActivity : Activity() {
 
     private fun updateDiagnostics() {
         val p = getSharedPreferences("diagnostics", MODE_PRIVATE)
+        // The provider keeps the latest receipt under the probe keys; the plain
+        // "status"/"time" keys are a leftover of the pre-probe protocol and may
+        // still hold a fault from days ago. Never show those as if they were
+        // the current state.
+        val probeStatus = p.getString(IndicatorConfig.PROBE_STATUS, "") ?: ""
+        val probeTime = p.getLong(IndicatorConfig.PROBE_TIME, 0)
+        val legacyStatus = p.getString("status", "") ?: ""
+        val legacyTime = p.getLong("time", 0)
         val matchedProbe = lastProbeToken != null &&
             p.getString(IndicatorConfig.PROBE_TOKEN, null) == lastProbeToken
-        val timestamp = if (matchedProbe) p.getLong(IndicatorConfig.PROBE_TIME, 0)
-            else p.getLong("time", 0)
-        val status = if (matchedProbe) p.getString(IndicatorConfig.PROBE_STATUS, "")
-            else p.getString("status", "")
-        val revision = if (matchedProbe) p.getLong(IndicatorConfig.PROBE_REVISION, -1)
-            else p.getLong("revision", -1)
+        val status = when {
+            matchedProbe || probeStatus.isNotEmpty() -> probeStatus
+            else -> legacyStatus
+        }
+        val timestamp = when {
+            matchedProbe || probeTime > 0 -> probeTime
+            else -> legacyTime
+        }
+        val revision = p.getLong(IndicatorConfig.PROBE_REVISION, -1)
         val stamp = if (timestamp > 0) SimpleDateFormat("MM-dd HH:mm:ss", Locale.CHINA).format(Date(timestamp)) else ""
-        diagnostic.text = if (matchedProbe) "$status\n$stamp"
-            else "未收到本次回执，请检查 LSPosed 作用域及 SystemUI 是否已重启" +
-                if (timestamp > 0) "\n上次：$status\n$stamp" else ""
+        diagnostic.text = when {
+            matchedProbe -> "$status\n$stamp"
+            status.isNotEmpty() -> "本次未收到回执，显示上次回执：\n$status\n$stamp"
+            else -> "未收到 SystemUI 回执，请检查 LSPosed 作用域及 SystemUI 是否已重启"
+        }
         val received = matchedProbe && revision == prefs.getLong("revision", 0)
-        saved.text = if (received) "设置已保存 · SystemUI 已接收" else "设置已保存 · 系统尚未确认"
+
+        // The hero card mirrors the same report.
+        val live = status.ifEmpty { "尚未收到 SystemUI 回执" }
+        statusLabel.text = live
+        statusTime.text = stamp
+        statusDot.color = when {
+            status.contains("替换已运行") -> palette.accent
+            status.contains("回退") -> palette.danger
+            status.isEmpty() -> palette.muted
+            else -> palette.surfaceAlt
+        }
+        saveLabel.text = if (received) "已保存 · SystemUI 已接收" else "已保存 · 系统尚未确认"
     }
 
-    private fun section(name: String) {
-        val divider = View(this).apply { setBackgroundColor(if (dark) 0xFF303638.toInt() else 0xFFE7EBEC.toInt()) }
-        controls.addView(divider, LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(16); bottomMargin = dp(12) })
-        controls.addView(label(name, 18f).apply {
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            setPadding(0, 0, 0, dp(8))
-        })
-    }
-
-    private fun toggle(title: String, key: String, default: Boolean, confirm: Boolean = false) {
-        val widget = Switch(this).apply {
-            text = title; textSize = 16f; setTextColor(ink); isChecked = prefs.getBoolean(key, default)
-            setPadding(0, dp(12), 0, dp(12)); minHeight = dp(52)
-        }
-        var internal = false
-        val numberMode = key == "showNumber" || key == "autoNumber"
-        if (numberMode) numberSwitches[key] = widget
-        widget.setOnCheckedChangeListener { _, checked ->
-            if (!internal && !updatingNumberSwitches) {
-                if (numberMode) {
-                    IndicatorConfig.setNumberMode(prefs, key, checked)
-                    updatingNumberSwitches = true
-                    try {
-                        numberSwitches.forEach { (name, switch) ->
-                            switch.isChecked = prefs.getBoolean(name, false)
-                        }
-                    } finally { updatingNumberSwitches = false }
-                    scheduleSave()
-                    return@setOnCheckedChangeListener
-                }
-                if (confirm && checked) {
-                    internal = true; widget.isChecked = false; internal = false
-                    AlertDialog.Builder(this).setTitle("启用系统图标替换？")
-                        .setMessage("已按 ColorOS 17 的 SuperIcon 契约实现。首次使用请确认：LSPosed 中已启用本模块、作用域包含 SystemUI，并已重启 SystemUI。异常时在 LSPosed 停用本模块并重启即可恢复。不会自动重启系统。")
-                        .setNegativeButton("取消", null)
-                        .setPositiveButton("启用") { _, _ ->
-                            internal = true; widget.isChecked = true; internal = false
-                            prefs.edit().putBoolean(key, true).apply(); scheduleSave()
-                        }.show()
-                } else {
-                    prefs.edit().putBoolean(key, checked).apply(); scheduleSave()
-                }
-            }
-        }
-        controls.addView(widget, LinearLayout.LayoutParams(-1, -2))
-    }
-
-    private fun slider(title: String, key: String, min: Int, max: Int, default: Int, unit: String) {
-        val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(10), 0, 0) }
-        top.addView(label(title, 15f), LinearLayout.LayoutParams(0, -2, 1f))
-        val value = label("${prefs.getInt(key, default)}$unit", 14f, accent).apply { typeface = Typeface.MONOSPACE }
-        top.addView(value)
-        controls.addView(top)
-        val bar = SeekBar(this).apply {
-            this.max = max - min; progress = prefs.getInt(key, default).coerceIn(min, max) - min
-            contentDescription = title
-            progressTintList = ColorStateList.valueOf(accent); thumbTintList = ColorStateList.valueOf(accent)
-            setPadding(dp(4), 0, dp(4), 0)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                    if (!fromUser) return
-                    val next = progress + min
-                    value.text = "$next$unit"
-                    prefs.edit().putInt(key, next).apply(); scheduleSave()
-                }
-                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
-            })
-        }
-        controls.addView(bar, LinearLayout.LayoutParams(-1, dp(44)))
-    }
-
-    private fun colorRow(title: String, key: String, default: Int) {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            background = shape(if (dark) 0xFF262B2E.toInt() else 0xFFF1F4F5.toInt(), 4f)
-            isClickable = true; isFocusable = true; contentDescription = "$title 颜色"
-        }
-        val color = prefs.getInt(key, default)
-        val swatch = View(this).apply { background = shape(color, 4f) }
-        row.addView(swatch, LinearLayout.LayoutParams(dp(28), dp(28)).apply { marginEnd = dp(12) })
-        row.addView(label(title, 15f), LinearLayout.LayoutParams(0, -2, 1f))
-        val hex = label(hex(color), 13f, muted).apply { typeface = Typeface.MONOSPACE }
-        row.addView(hex)
-        row.setOnClickListener {
-            val input = EditText(this).apply {
-                setSingleLine(); setText(hex(prefs.getInt(key, default))); selectAll()
-                contentDescription = "十六进制颜色"; inputType = android.text.InputType.TYPE_CLASS_TEXT
-            }
-            val holder = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL; setPadding(dp(20), 0, dp(20), dp(12))
-                addView(input)
-            }
-            val palette = LinearLayout(this)
-            listOf(0xFF1CB753, 0xFFE7433A, 0xFFFFB300, 0xFF2F80ED, 0xFF007F70).forEach { entry ->
-                palette.addView(View(this).apply {
-                    background = shape(entry.toInt(), 4f); contentDescription = hex(entry.toInt())
-                    isFocusable = true; setOnClickListener { input.setText(hex(entry.toInt())) }
-                }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { setMargins(dp(3), dp(8), dp(3), 0) })
-            }
-            holder.addView(palette)
-            val dialog = AlertDialog.Builder(this).setTitle(title).setView(holder)
-                .setNegativeButton("取消", null).setPositiveButton("保存", null).create()
-            dialog.setOnShowListener {
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                    val raw = input.text.toString().trim()
-                    if (!Regex("#[0-9a-fA-F]{6}").matches(raw)) input.error = "请输入 #RRGGBB"
-                    else {
-                        val next = Color.parseColor(raw)
-                        prefs.edit().putInt(key, next).apply()
-                        swatch.background = shape(next, 4f); hex.text = hex(next)
-                        scheduleSave(); dialog.dismiss()
-                    }
-                }
-            }
-            dialog.show()
-        }
-        controls.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
-    }
+    // ------------------------------------------------------------------ small helpers
 
     private fun iconButton(icon: Int, title: String, action: () -> Unit) = ImageButton(this).apply {
-        setImageResource(icon); imageTintList = ColorStateList.valueOf(accent)
-        background = null; contentDescription = title; tooltipText = title
-        layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
+        setImageResource(icon)
+        imageTintList = ColorStateList.valueOf(palette.accent)
+        background = rounded(palette.surface, 14f, palette.stroke)
+        contentDescription = title
+        tooltipText = title
+        setPadding(dp(10), dp(10), dp(10), dp(10))
         setOnClickListener { action() }
     }
-    private fun label(text: String, size: Float, color: Int = ink) = TextView(this).apply {
-        this.text = text; textSize = size; setTextColor(color); setLineSpacing(dp(2).toFloat(), 1f)
-    }
-    private fun shape(color: Int, radius: Float) = GradientDrawable().apply { setColor(color); cornerRadius = dp(radius).toFloat() }
+
+    private fun label(text: String, size: Float, color: Int = palette.ink) =
+        Label(this, text, size, color)
+
     private fun hex(color: Int) = String.format(Locale.ROOT, "#%06X", color and 0xFFFFFF)
     private fun dp(value: Int) = dp(value.toFloat())
     private fun dp(value: Float) = kotlin.math.round(value * resources.displayMetrics.density).toInt()
+}
+
+/**
+ * A plain [TextView] that carries the app's typography defaults.
+ *
+ * The platform's `TextView` cannot take the line spacing and colour in one constructor
+ * call, and the settings screen sets both on almost every label.
+ */
+internal class Label(context: Context, text: String, size: Float, color: Int) : TextView(context) {
+    init {
+        this.text = text
+        textSize = size
+        setTextColor(color)
+    }
 }

@@ -4,11 +4,12 @@ import android.graphics.*
 import android.view.View
 import android.view.ViewGroup
 import android.widget.SeekBar
-import android.widget.Spinner
 import android.widget.Switch
+import android.widget.TextView
 import io.github.threeinone.config.IndicatorConfig
 import io.github.threeinone.model.*
 import io.github.threeinone.render.IndicatorRenderer
+import io.github.threeinone.ui.CardSwitch
 import io.github.threeinone.ui.MainActivity
 import org.junit.Assert.*
 import org.junit.Test
@@ -410,10 +411,16 @@ class RenderingTest {
                 View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
             root.layout(0, 0, width, height)
             val views = descendants(root)
-            assertEquals(11, views.count { it is SeekBar })
-            assertEquals(8, views.count { it is Switch })
-            val spinner = views.filterIsInstance<Spinner>().single()
-            spinner.setSelection(1)
+            // The settings page was reduced to switches and colour swatches: every
+            // slider is gone, so nothing can be dragged any more.
+            assertEquals(0, views.count { it is SeekBar })
+            assertEquals(8, views.count { it is CardSwitch })
+            assertEquals(0, views.count { it is Switch })
+            // The preview state is picked with chips instead of a spinner.
+            val chips = views.filterIsInstance<TextView>()
+                .filter { it.text.toString() in IndicatorState.previews.map { it.first } }
+            assertTrue(chips.size >= 2)
+            chips[1].performClick()
             org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
             root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))

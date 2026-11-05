@@ -4,9 +4,11 @@ import android.graphics.*
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Switch
+import android.widget.TextView
 import io.github.threeinone.config.IndicatorConfig
 import io.github.threeinone.model.*
 import io.github.threeinone.render.IndicatorRenderer
+import io.github.threeinone.ui.CardSwitch
 import io.github.threeinone.ui.MainActivity
 import org.junit.Assert.*
 import org.junit.Test
@@ -37,13 +39,16 @@ class ChargingMarkerTest {
             fun descendants(v: View): List<View> = listOf(v) +
                 if (v is ViewGroup) (0 until v.childCount).flatMap { descendants(v.getChildAt(it)) }
                 else emptyList()
-            val switches = descendants(controller.get().findViewById(android.R.id.content))
-                .filterIsInstance<Switch>()
+            val views = descendants(controller.get().findViewById(android.R.id.content))
             // The percentage is always part of the new layout, so the settings
             // page no longer offers the "always"/"automatic" number switches.
-            assertFalse(switches.any { it.text.contains("始终显示电量数字") })
-            assertFalse(switches.any { it.text.contains("低于阈值自动显示") })
-            assertEquals(8, switches.size)
+            val labels = views.filterIsInstance<TextView>().map { it.text.toString() }
+            assertFalse(labels.any { it.contains("始终显示电量数字") })
+            assertFalse(labels.any { it.contains("低电量自动显示数字") })
+            // Every switch on the page is one of the eight hand-drawn card switches;
+            // the platform widget is gone for good.
+            assertEquals(8, views.count { it is CardSwitch })
+            assertEquals(0, views.count { it is Switch })
             assertFalse(prefs.getBoolean("autoNumber", true))
             assertEquals(30, prefs.getInt("numberThreshold", 0))
             assertEquals(250, prefs.getInt("numberScale", 0))
