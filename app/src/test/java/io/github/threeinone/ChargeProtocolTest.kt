@@ -3,6 +3,7 @@ package io.github.threeinone
 import io.github.threeinone.hook.SystemStateSource
 import io.github.threeinone.model.ChargeProtocol
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
@@ -143,6 +144,59 @@ class ChargeProtocolTest {
         assertEquals(
             ChargeProtocol.SUPER_VOOC,
             detect(chargeTech = 14, chargeTechnology = 3, plugged = 1, wattage = 0, charging = true)
+        )
+    }
+
+    /**
+     * The contract's power ceiling is the value the 电池检测 app shows as "PPS 最大功率".
+     * The node carries it in an unspecified unit, so the raw values are normalised the
+     * same way the app does.
+     */
+    @Test fun theContractPowerCeilingIsNormalisedToWatts() {
+        assertEquals(120, SystemStateSource.contractWatts("120"))
+        assertEquals(120, SystemStateSource.contractWatts("120000"))
+        assertEquals(120, SystemStateSource.contractWatts("120000000"))
+        assertEquals(30, SystemStateSource.contractWatts("30"))
+        assertEquals(30, SystemStateSource.contractWatts("30000"))
+        assertEquals(0, SystemStateSource.contractWatts(null))
+        assertEquals(0, SystemStateSource.contractWatts(""))
+        assertEquals(0, SystemStateSource.contractWatts("n/a"))
+    }
+
+    /**
+     * The original OnePlus charger speaks UFCS and PPS as well, and the firmware only
+     * flags the proprietary SuperVOOC rail when the original cable is used. The 120 W
+     * contract ceiling identifies it regardless of the link that was negotiated.
+     */
+    @Test fun theOriginalChargerIsRecognisedByIts120WContractCeiling() {
+        // UFCS link, but the original 120 W unit → the proprietary rail (violet).
+        assertEquals(
+            ChargeProtocol.SUPER_VOOC,
+            SystemStateSource.fastProtocolFromFlags(voocIng = 0, ppsIng = 4, contractWatts = 120)
+        )
+        // PPS link, same charger → still the proprietary rail.
+        assertEquals(
+            ChargeProtocol.SUPER_VOOC,
+            SystemStateSource.fastProtocolFromFlags(voocIng = 0, ppsIng = 2, contractWatts = 120)
+        )
+        // A third-party UFCS charger signs a much lower contract → stays green.
+        assertEquals(
+            ChargeProtocol.UFCS,
+            SystemStateSource.fastProtocolFromFlags(voocIng = 0, ppsIng = 4, contractWatts = 30)
+        )
+        // A third-party PPS charger → stays blue.
+        assertEquals(
+            ChargeProtocol.PPS,
+            SystemStateSource.fastProtocolFromFlags(voocIng = 0, ppsIng = 2, contractWatts = 30)
+        )
+        // The proprietary flag always wins, whatever the ceiling says.
+        assertEquals(
+            ChargeProtocol.SUPER_VOOC,
+            SystemStateSource.fastProtocolFromFlags(voocIng = 1, ppsIng = 4, contractWatts = 30)
+        )
+        // No fast-charge standard running at all.
+        assertNull(
+            SystemStateSource.fastProtocolFromFlags(voocIng = 0, ppsIng = 0, contractWatts = 120)
         )
     }
 }
