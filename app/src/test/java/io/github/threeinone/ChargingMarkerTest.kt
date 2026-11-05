@@ -45,9 +45,10 @@ class ChargingMarkerTest {
             val labels = views.filterIsInstance<TextView>().map { it.text.toString() }
             assertFalse(labels.any { it.contains("始终显示电量数字") })
             assertFalse(labels.any { it.contains("低电量自动显示数字") })
-            // Every switch on the page is one of the eight hand-drawn card switches;
-            // the platform widget is gone for good.
-            assertEquals(8, views.count { it is CardSwitch })
+            // Every switch on the page is one of the hand-drawn card switches; the
+            // platform widget is gone for good. The page was reduced to the master
+            // switch plus the two colour toggles.
+            assertEquals(3, views.count { it is CardSwitch })
             assertEquals(0, views.count { it is Switch })
             assertFalse(prefs.getBoolean("autoNumber", true))
             assertEquals(30, prefs.getInt("numberThreshold", 0))

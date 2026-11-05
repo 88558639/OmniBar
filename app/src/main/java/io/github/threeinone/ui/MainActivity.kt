@@ -166,6 +166,27 @@ class MainActivity : Activity() {
         }
         content.addView(card, LinearLayout.LayoutParams(-1, -2))
 
+        // The master switch sits on the status card: it is the one control that
+        // decides whether the stock icons are replaced at all.
+        val master = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(2), 0, dp(6))
+        }
+        val masterTexts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        masterTexts.addView(label("启用三合一", 15.5f))
+        masterTexts.addView(label("替换 ColorOS 状态栏的网络与电量图标", 12f, palette.muted).apply {
+            setPadding(0, dp(3), dp(12), 0)
+            setLineSpacing(dp(2).toFloat(), 1f)
+        })
+        master.addView(masterTexts, LinearLayout.LayoutParams(0, -2, 1f))
+        val masterSwitch = CardSwitch(this).apply {
+            setCheckedSilently(prefs.getBoolean("enabled", false))
+            contentDescription = "启用三合一"
+        }
+        bindMasterSwitch(masterSwitch)
+        master.addView(masterSwitch, LinearLayout.LayoutParams(dp(52), dp(32)))
+        card.addView(master, LinearLayout.LayoutParams(-1, -2))
+
         val head = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         statusDot = StatusDot(this)
         head.addView(statusDot, LinearLayout.LayoutParams(dp(10), dp(10)).apply { marginEnd = dp(8) })
@@ -235,13 +256,6 @@ class MainActivity : Activity() {
     }
 
     private fun buildGroups() {
-        section("系统显示").apply {
-            switchRow("启用三合一", "替换 ColorOS 状态栏的网络与电量图标", "enabled", false, confirm = true)
-            switchRow("锁屏显示三合一", "锁屏界面同样使用三合一图标", "lockscreen", true)
-            switchRow("显示 VPN 标记", "在蜂窝信号旁叠加 VPN 标识", "showVpn", true)
-            switchRow("反向布局（侧边徽标）", "将图标移到状态栏右侧", "swap", false)
-        }
-
         section("状态颜色").apply {
             switchRow("启用状态颜色", "按电量与省电状态自动着色", "colors", true)
             colorRow("低电量", "lowColor", 0xFFE7433A.toInt())
@@ -262,11 +276,6 @@ class MainActivity : Activity() {
             hint("自动模式按充电协议上色：原装一加充电器紫、第三方 UFCS 绿、PPS 蓝、" +
                 "普通与慢充橙。原装识别依据充电合同的最大功率 120W —— 原装头协商到该上限，" +
                 "第三方充电器通常只有 30W 上下。")
-        }
-
-        section("蜂窝与信号").apply {
-            switchRow("显示副卡信号（右列）", "同时显示第二张卡的信号强度", "dualSim", true)
-            switchRow("显示上下行活动箭头", "有数据流量时显示上下行箭头", "showActivity", false)
         }
 
         section("适配诊断").apply {
@@ -359,12 +368,36 @@ class MainActivity : Activity() {
         )
     }
 
+    /**
+     * Binds the master switch on the status card.
+     *
+     * Turning the replacement on is easy to misjudge — the stock icons vanish — so the
+     * switch asks first and only stores the choice once the user confirms.
+     */
+    private fun bindMasterSwitch(widget: CardSwitch) {
+        widget.onCheckedChange = { checked: Boolean ->
+            if (!checked) {
+                prefs.edit().putBoolean("enabled", false).apply(); scheduleSave()
+            } else {
+                // Roll the switch back and ask.
+                widget.setCheckedSilently(false)
+                AlertDialog.Builder(this)
+                    .setTitle("启用系统图标替换？")
+                    .setMessage("已按 ColorOS 17 的 SuperIcon 契约实现。首次使用请确认：LSPosed 中已启用本模块、作用域包含 SystemUI，并已重启 SystemUI。异常时在 LSPosed 停用本模块并重启即可恢复。不会自动重启系统。")
+                    .setNegativeButton("取消", null)
+                    .setPositiveButton("启用") { _, _ ->
+                        widget.setCheckedSilently(true)
+                        prefs.edit().putBoolean("enabled", true).apply(); scheduleSave()
+                    }.show()
+            }
+        }
+    }
+
     private fun LinearLayout.switchRow(
         title: String,
         subtitle: String?,
         key: String,
-        default: Boolean,
-        confirm: Boolean = false
+        default: Boolean
     ) {
         rowSeparator()
         val row = LinearLayout(this@MainActivity).apply {
@@ -386,23 +419,7 @@ class MainActivity : Activity() {
             contentDescription = title
         }
         widget.onCheckedChange = { checked: Boolean ->
-            when {
-                confirm && checked -> {
-                    // Roll the switch back and ask — the replacement is easy to misjudge.
-                    widget.setCheckedSilently(false)
-                    AlertDialog.Builder(this@MainActivity)
-                        .setTitle("启用系统图标替换？")
-                        .setMessage("已按 ColorOS 17 的 SuperIcon 契约实现。首次使用请确认：LSPosed 中已启用本模块、作用域包含 SystemUI，并已重启 SystemUI。异常时在 LSPosed 停用本模块并重启即可恢复。不会自动重启系统。")
-                        .setNegativeButton("取消", null)
-                        .setPositiveButton("启用") { _, _ ->
-                            widget.setCheckedSilently(true)
-                            prefs.edit().putBoolean(key, true).apply(); scheduleSave()
-                        }.show()
-                }
-                else -> {
-                    prefs.edit().putBoolean(key, checked).apply(); scheduleSave()
-                }
-            }
+            prefs.edit().putBoolean(key, checked).apply(); scheduleSave()
         }
         row.addView(widget, LinearLayout.LayoutParams(dp(52), dp(32)))
         addView(row, LinearLayout.LayoutParams(-1, -2))

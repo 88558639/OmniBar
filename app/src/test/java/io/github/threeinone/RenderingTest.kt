@@ -414,7 +414,7 @@ class RenderingTest {
             // The settings page was reduced to switches and colour swatches: every
             // slider is gone, so nothing can be dragged any more.
             assertEquals(0, views.count { it is SeekBar })
-            assertEquals(8, views.count { it is CardSwitch })
+            assertEquals(3, views.count { it is CardSwitch })
             assertEquals(0, views.count { it is Switch })
             // The preview state is picked with chips instead of a spinner.
             val chips = views.filterIsInstance<TextView>()
