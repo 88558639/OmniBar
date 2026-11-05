@@ -3,9 +3,11 @@ package io.github.threeinone.render
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.os.SystemClock
 import android.view.View
 import io.github.threeinone.config.IndicatorConfig
 import io.github.threeinone.model.IndicatorState
+import io.github.threeinone.model.WifiPhase
 
 class IndicatorView(context: Context) : View(context) {
     private val renderer = IndicatorRenderer()
@@ -108,6 +110,18 @@ class IndicatorView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (!aligned) alignToStatusBar()
-        renderer.draw(canvas, width.toFloat(), height.toFloat(), state, config, tint)
+        // While the Wi-Fi is connecting the bars climb, so the view has to ask for the
+        // next frame on its own — the state itself does not change in between.
+        val connecting = state.wifi == WifiPhase.CONNECTING
+        val phase = if (connecting) {
+            (SystemClock.uptimeMillis() % CONNECT_CYCLE_MS) / CONNECT_CYCLE_MS.toFloat()
+        } else 0f
+        renderer.draw(canvas, width.toFloat(), height.toFloat(), state, config, tint, 0f, phase)
+        if (connecting) postInvalidateOnAnimation()
+    }
+
+    private companion object {
+        /** Length of one connecting cycle; the three bars rise once per cycle. */
+        const val CONNECT_CYCLE_MS = 900L
     }
 }

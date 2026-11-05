@@ -3,6 +3,7 @@ package io.github.threeinone.render
 import android.graphics.*
 import io.github.threeinone.config.IndicatorConfig
 import io.github.threeinone.model.*
+import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.sin
 
@@ -143,7 +144,7 @@ class IndicatorRenderer {
          * It has to fill the fan to read as part of it, so it is drawn big enough to
          * stand between the arcs — but never wider than the fan itself.
          */
-        const val WIFI_MARK_SIZE = 28f
+        const val WIFI_MARK_SIZE = 30f
 
         /** The mark may not spread wider than this. */
         const val WIFI_MARK_MAX_WIDTH = 34f
@@ -155,6 +156,21 @@ class IndicatorRenderer {
          * (y = 73), so its middle is around y = 59. The mark is centred there.
          */
         const val WIFI_MARK_CENTER_Y = 59f
+
+        /** Width of one bar of the connecting animation. */
+        const val CONNECT_BAR_WIDTH = 4.6f
+
+        /** Gap between two bars. */
+        const val CONNECT_BAR_GAP = 5.4f
+
+        /** Baseline the bars grow from. */
+        const val CONNECT_BAR_BASELINE = 71f
+
+        /** Height of a bar at its peak. */
+        const val CONNECT_BAR_MAX = 19f
+
+        /** Height of a bar at its lowest — it never disappears completely. */
+        const val CONNECT_BAR_MIN = 5f
 
         /**
          * Largest the charging bolt may get.
@@ -269,7 +285,7 @@ class IndicatorRenderer {
 
     fun draw(
         canvas: Canvas, width: Float, height: Float, state: IndicatorState, config: IndicatorConfig,
-        tint: Int, extraShiftPx: Float = 0f
+        tint: Int, extraShiftPx: Float = 0f, connectPhase: Float = 0f
     ) {
         if (width <= 0 || height <= 0) return
         val scale = min(width / 100f, height / 100f)
@@ -301,7 +317,7 @@ class IndicatorRenderer {
             if (state.airplane) {
                 airplane(canvas, tint)
             } else if (state.wifiConnected || state.wifi == WifiPhase.CONNECTING) {
-                wifiFan(canvas, config, tint, state)
+                wifiFan(canvas, config, tint, state, connectPhase)
             } else {
                 drawNetworkFallback(canvas, state, config, tint)
             }
@@ -569,17 +585,19 @@ class IndicatorRenderer {
 
     // ------------------------------------------------------------------ wifi
 
-    private fun wifiFan(canvas: Canvas, config: IndicatorConfig, tint: Int, state: IndicatorState) {
+    private fun wifiFan(
+        canvas: Canvas, config: IndicatorConfig, tint: Int, state: IndicatorState,
+        connectPhase: Float
+    ) {
         // A fan that carries a state mark fades out: the mark in its middle is then
         // the loud part, and the pale fan says that the problem is the Wi-Fi.
-        // A connecting fan is already faint, so it only gets the mark.
+        // A connecting fan is already faint, so it only gets the rising bars.
         val mark = when (state.wifi) {
             WifiPhase.NO_INTERNET -> "!"
             WifiPhase.CAPTIVE -> "?"
-            WifiPhase.CONNECTING -> "..."
             else -> null
         }
-        val faded = state.wifi == WifiPhase.NO_INTERNET || state.wifi == WifiPhase.CAPTIVE
+        val faded = mark != null
         val ws = min(config.wifiScale / 115f, 1.16f)
         val wSave = canvas.save()
         // Centred inside the dot ring: the fan's mass sits around y = 50..65, not up top.
@@ -610,6 +628,39 @@ class IndicatorRenderer {
             val baseline = WIFI_MARK_CENTER_Y - glyphs.top - glyphs.height() / 2f
             canvas.drawText(mark, 50f, baseline, paint)
         }
+        if (state.wifi == WifiPhase.CONNECTING) {
+            drawConnectingBars(canvas, tint, connectPhase)
+        }
+    }
+
+    /**
+     * The connecting animation: three bars that climb one after another, over and over.
+     *
+     * The "..." said "connecting" without saying whether anything was going on. The
+     * bars do: they keep rising until the network is up.
+     */
+    private fun drawConnectingBars(canvas: Canvas, color: Int, phase: Float) {
+        fill(color)
+        val total = CONNECT_BAR_WIDTH * 3f + CONNECT_BAR_GAP * 2f
+        val left = 50f - total / 2f
+        for (i in 0..2) {
+            // Every bar peaks at its own third of the cycle, so the peak travels from
+            // the left bar to the right one and the wave repeats for good.
+            val peak = (i + 0.5f) / 3f
+            val slot = frac(phase + 0.5f - peak)
+            val factor = 1f - abs(2f * slot - 1f)
+            val height = CONNECT_BAR_MIN + (CONNECT_BAR_MAX - CONNECT_BAR_MIN) * factor
+            val x = left + i * (CONNECT_BAR_WIDTH + CONNECT_BAR_GAP)
+            val top = CONNECT_BAR_BASELINE - height
+            canvas.drawRoundRect(x, top, x + CONNECT_BAR_WIDTH, CONNECT_BAR_BASELINE,
+                CONNECT_BAR_WIDTH / 2f, CONNECT_BAR_WIDTH / 2f, paint)
+        }
+    }
+
+    /** The fractional part of a number, always positive. */
+    private fun frac(value: Float): Float {
+        val f = value - Math.floor(value.toDouble()).toFloat()
+        return if (f < 0f) f + 1f else f
     }
 
     // ------------------------------------------------------------------ badges

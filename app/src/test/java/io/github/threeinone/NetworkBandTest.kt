@@ -34,9 +34,13 @@ class NetworkBandTest {
     /** The indicator is a 100-unit box; the test bitmap is 300 px wide. */
     private val px = 3
 
-    private fun render(state: IndicatorState, config: IndicatorConfig = IndicatorConfig()): Bitmap {
+    private fun render(
+        state: IndicatorState, config: IndicatorConfig = IndicatorConfig(),
+        connectPhase: Float = 0f
+    ): Bitmap {
         val bitmap = Bitmap.createBitmap(300, 300, Bitmap.Config.ARGB_8888)
-        IndicatorRenderer().draw(Canvas(bitmap), 300f, 300f, state, config, Color.BLACK)
+        IndicatorRenderer().draw(Canvas(bitmap), 300f, 300f, state, config, Color.BLACK,
+            0f, connectPhase)
         return bitmap
     }
 
@@ -89,7 +93,7 @@ class NetworkBandTest {
      * A mark beside the fan had no room, and the two merged into one blob.
      */
     @Test fun theWifiMarkSitsInTheMiddleOfTheFan() {
-        for (phase in listOf(WifiPhase.NO_INTERNET, WifiPhase.CAPTIVE, WifiPhase.CONNECTING)) {
+        for (phase in listOf(WifiPhase.NO_INTERNET, WifiPhase.CAPTIVE)) {
             val marked = render(demo.copy(wifi = phase))
             // The fan's own box, so that only the mark is measured.
             val box = inkBox(marked, 30f, 70f, 40f, 78f)
@@ -97,9 +101,42 @@ class NetworkBandTest {
             val centreX = (box!![0] + box[2]) / 2f
             val centreY = (box[1] + box[3]) / 2f
             assertEquals("$phase: the mark is not centred on the fan", 50f, centreX, 2f)
-            assertEquals("$phase: the mark is not centred in the fan", 
+            assertEquals("$phase: the mark is not centred in the fan",
                 IndicatorRenderer.WIFI_MARK_CENTER_Y, centreY, 4f)
         }
+    }
+
+    /**
+     * The connecting state is an animation: three bars climb one after another.
+     *
+     * The "..." said "connecting" without saying whether anything was going on, so the
+     * peak now travels from the left bar to the right one.
+     */
+    @Test fun theConnectingBarsClimbOneAfterAnother() {
+        val first = render(demo.copy(wifi = WifiPhase.CONNECTING), connectPhase = 1f / 6f)
+        val second = render(demo.copy(wifi = WifiPhase.CONNECTING), connectPhase = 1f / 2f)
+        val third = render(demo.copy(wifi = WifiPhase.CONNECTING), connectPhase = 5f / 6f)
+        // The left bar is at its peak first, the middle one next, the right one last.
+        assertTrue("The left bar does not lead", barTop(first, 0) < barTop(first, 1))
+        assertTrue("The middle bar does not follow", barTop(second, 1) < barTop(second, 2))
+        assertTrue("The right bar does not finish", barTop(third, 2) < barTop(third, 0))
+        // The bars are solid — the fan behind them is the pale one.
+        assertTrue("The bars are not solid",
+            peakAlpha(first, 36f, 64f, 50f, 74f) >= 250)
+        // The animation really moves.
+        assertFalse("The connecting mark does not move", first.sameAs(second))
+    }
+
+    /** The top edge of one of the three connecting bars, in units. */
+    private fun barTop(b: Bitmap, index: Int): Float {
+        val total = IndicatorRenderer.CONNECT_BAR_WIDTH * 3f + IndicatorRenderer.CONNECT_BAR_GAP * 2f
+        val left = 50f - total / 2f + index * (IndicatorRenderer.CONNECT_BAR_WIDTH + IndicatorRenderer.CONNECT_BAR_GAP)
+        for (y in (44 * px).toInt()..(76 * px).toInt()) {
+            for (x in (left * px).toInt()..((left + IndicatorRenderer.CONNECT_BAR_WIDTH) * px).toInt()) {
+                if (Color.alpha(b.getPixel(x, y)) > 128) return y.toFloat() / px
+            }
+        }
+        return Float.MAX_VALUE
     }
 
     /** The faded fan is what says "this is a Wi-Fi problem". */
