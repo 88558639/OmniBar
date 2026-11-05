@@ -154,20 +154,43 @@ class IndicatorRenderer {
         /** Width of the VPN shield glyph in its own units. */
         const val VPN_WIDTH = 10f
 
-        /** Height of the VPN shield glyph in its own units. */
+        /** Height of the VPN shield glyph in its own units (top edge down to the tip). */
         const val VPN_HEIGHT = 12f
+
+        /** Stroke of the shield, in indicator units — it adds a rim on every side. */
+        const val VPN_STROKE = 2.4f
 
         /** Largest the shield may get — it stays a badge, not a second indicator. */
         const val VPN_MAX_SCALE = 1.6f
 
         /** Gap between the shield and the percentage. */
-        const val VPN_GAP = 2f
+        const val VPN_GAP = 3f
 
         /** Clearance the shield keeps from the edge of the box. */
         const val VPN_EDGE = 1f
 
-        /** Top edge of the shield. */
-        const val VPN_TOP = 1.5f
+        /**
+         * Top edge of the shield.
+         *
+         * The shield is a corner badge, exactly like the charging bolt: it hangs on the
+         * top line of the indicator instead of floating next to the digits. That is what
+         * keeps it clear of the signal dots — the left column starts below the digits,
+         * and a badge that hangs from the top cannot reach it.
+         */
+        const val VPN_TOP = 0f
+
+        /** How far the shield may rise above the top of the digits. */
+        const val VPN_RISE = 3f
+
+        /**
+         * Clearance the shield keeps from the signal dots.
+         *
+         * The shield used to be pinned to the percentage only, so its pointed bottom
+         * reached into the top left signal dot and the two marks ran together. The room
+         * down to that dot now limits the size instead, which keeps the gap whatever the
+         * dot spacing is.
+         */
+        const val VPN_DOT_CLEARANCE = 3f
 
         /** Right edge of the box, for the mirrored layout. */
         const val BOX_EDGE_RIGHT = 99f
@@ -209,16 +232,16 @@ class IndicatorRenderer {
             val ringRadius = ringRadius(dotRadius, spread, config)
 
             drawNumber(canvas, state, config, tint)
+            // Top edge of the highest signal dot: the corner badges have to stay above it.
+            val dotTop = RING_CENTER_Y +
+                ringRadius * sin(Math.toRadians(-33.0 * spread)).toFloat() - dotRadius
             if (state.batteryPhase == BatteryPhase.CHARGING || state.batteryPhase == BatteryPhase.FULL) {
-                // Top edge of the highest signal dot: the badge must stay above it.
-                val dotTop = RING_CENTER_Y +
-                    ringRadius * sin(Math.toRadians(-33.0 * spread)).toFloat() - dotRadius
                 // The VPN shield takes the top right corner in the mirrored layout, so the
                 // badge moves to the other side there.
                 val onLeft = config.swap && config.showVpn && state.vpn
                 drawBolt(canvas, battery, dotTop, onLeft)
             }
-            if (config.showVpn && state.vpn) drawVpn(canvas, tint, config.swap)
+            if (config.showVpn && state.vpn) drawVpn(canvas, tint, config.swap, dotTop)
 
             if (state.airplane) {
                 airplane(canvas, tint)
@@ -524,24 +547,35 @@ class IndicatorRenderer {
      *
      * The shield stands next to the percentage: on the left in the normal layout, on the
      * right in the mirrored one, where the charging bolt takes the opposite corner.
+     *
+     * It hangs from the **top line** of the indicator like the charging bolt, and it is
+     * sized by the room down to the signal dots. Pinned to the percentage alone it used
+     * to hang low enough for its pointed bottom to run into the top left signal dot, and
+     * the two marks merged into one blob.
      */
-    private fun drawVpn(canvas: Canvas, color: Int, swap: Boolean) {
+    private fun drawVpn(canvas: Canvas, color: Int, swap: Boolean, dotTop: Float) {
         val save = canvas.save()
         try {
             val anchor = if (swap) numberRight + VPN_GAP else numberLeft - VPN_GAP
             val edge = if (swap) BOX_EDGE_RIGHT - VPN_EDGE else VPN_EDGE
             val room = if (swap) edge - anchor else anchor - edge
-            val scale = min(VPN_MAX_SCALE, room / VPN_WIDTH)
+            // The ink of the shield — not its path — is what has to stay clear of the
+            // dots, and the stroke adds a rim on every side.
+            val inkTop = maxOf(VPN_TOP, numberTop - VPN_RISE)
+            val heightRoom = dotTop - VPN_DOT_CLEARANCE - inkTop - VPN_STROKE
+            val scale = min(VPN_MAX_SCALE, min(heightRoom / VPN_HEIGHT, room / VPN_WIDTH))
+                .coerceAtLeast(0.2f)
             val width = VPN_WIDTH * scale
-            canvas.translate(if (swap) anchor else anchor - width, VPN_TOP)
+            // The path starts half a stroke below the top of the ink.
+            canvas.translate(if (swap) anchor else anchor - width, inkTop + VPN_STROKE / 2f)
             canvas.scale(scale, scale)
-            stroke(color, 2.4f / scale)
+            stroke(color, VPN_STROKE / scale)
             path.reset()
-            path.moveTo(0f, 4f); path.lineTo(10f, 4f); path.lineTo(10f, 10f)
-            path.lineTo(5f, 16f); path.lineTo(0f, 10f); path.close()
+            path.moveTo(0f, 0f); path.lineTo(10f, 0f); path.lineTo(10f, 6f)
+            path.lineTo(5f, 12f); path.lineTo(0f, 6f); path.close()
             canvas.drawPath(path, paint)
             path.reset()
-            path.moveTo(3f, 9f); path.lineTo(5f, 11f); path.lineTo(8f, 7f)
+            path.moveTo(3f, 5f); path.lineTo(5f, 7f); path.lineTo(8f, 3f)
             canvas.drawPath(path, paint)
         } finally { canvas.restoreToCount(save) }
     }
