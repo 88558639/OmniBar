@@ -141,16 +141,6 @@ class MainActivity : Activity() {
         })
         titles.addView(label("状态栏三合一 · ColorOS 17", 12f, palette.muted))
         bar.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
-
-        bar.addView(iconButton(android.R.drawable.ic_menu_revert, "恢复默认设置") {
-            AlertDialog.Builder(this).setTitle("恢复默认设置？")
-                .setMessage("恢复全部外观参数并关闭系统图标替换。")
-                .setNegativeButton("取消", null)
-                .setPositiveButton("恢复") { _, _ ->
-                    prefs.edit().clear().putBoolean(PreferenceMigration.MARKER, true).apply()
-                    buildPage(); scheduleSave()
-                }.show()
-        })
         return bar.apply {
             layoutParams = LinearLayout.LayoutParams(-1, dp(62))
             setPadding(0, dp(8), 0, dp(8))
@@ -261,18 +251,16 @@ class MainActivity : Activity() {
             colorRow("低电量", "lowColor", 0xFFE7433A.toInt())
             colorRow("严重电量", "criticalColor", 0xFFD50000.toInt())
             colorRow("省电模式", "saverColor", 0xFFFFB300.toInt())
-            colorRow("漫游颜色", "roamingColor", 0xFF2F80ED.toInt())
             hint("低电量与严重电量的分界沿用上次保存的阈值（默认 20% 与 10%），" +
                 "颜色在左侧色块上点击即可修改。")
         }
 
         section("充电配色").apply {
-            switchRow("按充电协议自动配色", "关闭后统一使用下方自定义充电色", "chargeColorAuto", true)
+            switchRow("按充电协议自动配色", "关闭后统一使用普通 / 慢充的橙色", "chargeColorAuto", true)
             colorRow("原装充电器 · 紫", "voocColor", 0xFF9C6BFF.toInt())
             colorRow("第三方 UFCS · 绿", "ufcsColor", 0xFF2ECC71.toInt())
             colorRow("PPS 充电器 · 蓝", "ppsColor", 0xFF3B82F6.toInt())
             colorRow("普通 / 慢充 · 橙", "unknownColor", 0xFFF97316.toInt())
-            colorRow("自定义充电色", "chargingColor", 0xFF1CB753.toInt())
             hint("自动模式按充电协议上色：原装一加充电器紫、第三方 UFCS 绿、PPS 蓝、" +
                 "普通与慢充橙。原装识别依据充电合同的最大功率 120W —— 原装头协商到该上限，" +
                 "第三方充电器通常只有 30W 上下。")
@@ -291,19 +279,6 @@ class MainActivity : Activity() {
     }
 
     private fun buildFooter() {
-        content.addView(
-            Button(this).apply {
-                text = "恢复原图标"
-                textSize = 15f
-                setTextColor(palette.ink)
-                background = rounded(palette.surface, 16f, palette.stroke)
-                isAllCaps = false
-                setOnClickListener {
-                    prefs.edit().putBoolean("enabled", false).apply(); buildPage(); scheduleSave()
-                }
-            },
-            LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(16) }
-        )
         content.addView(
             Button(this).apply {
                 text = "关于"
