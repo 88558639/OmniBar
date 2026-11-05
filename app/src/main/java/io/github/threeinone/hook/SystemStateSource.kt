@@ -136,6 +136,13 @@ class SystemStateSource(
         "/sys/class/power_supply/bms/charge_type"
     )
 
+    /**
+     * Active USB supply type (`[DCP]` / `[SDP]` / `[CDP]` / `[PD_PPS]` / `[BrickID]` …).
+     * The bracketed value is the currently-negotiated link; the 电池检测 app reads it to
+     * report "DCP" when the phone has dropped to a basic USB trickle.
+     */
+    private val USB_TYPE_PATH = "/sys/class/power_supply/usb/usb_type"
+
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {
             if (intent?.action == Intent.ACTION_BATTERY_CHANGED) {
@@ -217,19 +224,21 @@ class SystemStateSource(
 
     /**
      * Reads the negotiated charge protocol straight from the Oplus charging driver's
-     * sysfs nodes — the same data the `*#899#` engineering mode "快充模式" field and the
-     * 电池检测 app display, resolved in the exact priority that app uses
-     * (`fastChargeText`):
+     * sysfs nodes, resolved in the exact priority the 电池检测 app uses
+     * (`fastChargeText` + `usbDescOf`) so the indicator colour matches the app's
+     * "快充模式" field:
      *
      *  1. `voocchg_ing` == 1 → original OnePlus/OPPO SuperVOOC rail (violet)
      *  2. `ppschg_ing`   == 4 → third-party UFCS charger (green)
      *  3. `ppschg_ing`   == 2 → PPS charger (blue)
-     *  4. `charge_technology` / `charge_type` integer or name → mapped below
+     *  4. `charge_type` integer → 14=SVOOC, 16=PD, 8=VOOC, 2=normal (app's `protocol`)
+     *  5. `usb_type` active `[DCP]/[SDP]/[CDP]` → plain/basic USB → SLOW (orange)
+     *  6. `charge_technology` string/int → fallback, only when the link is not a basic
+     *     USB port, so a stale SVOOC code during a trickle DCP charge is not misread.
      *
-     * `charge_technology` is a protocol-name string on most Oplus firmwares but an
-     * integer code (e.g. `14`) on this PLK110 build, so both forms are handled. The
-     * caller only invokes this while charging, which keeps the stale value the node
-     * can hold while idle from leaking through.
+     * `charge_technology` is the charger's *capability* and can hold a stale value after
+     * the phone drops to a basic trickle, so it is the last resort — never the primary
+     * source. The caller only invokes this while charging.
      */
     private fun protocolFromSysfs(): ChargeProtocol? {
         // 1) Original OnePlus/OPPO SuperVOOC rail — only the proprietary charger sets this.
@@ -239,22 +248,53 @@ class SystemStateSource(
             4 -> return ChargeProtocol.UFCS // third-party UFCS charger
             2 -> return ChargeProtocol.PPS  // PPS charger
         }
-        // 3) `charge_technology`: a protocol-name string on most Oplus builds, but an
-        //    integer code on this PLK110 firmware, so handle both.
+        // 3) `charge_type` integer — the app's primary protocol source (its `protocol`
+        //    field). On this PLK110 build it carries the authoritative fast-charge code; a
+        //    string such as "Fast" is uninformative and falls through to the USB check.
+        CHARGE_TYPE_PATHS.firstNotNullOfOrNull { readSysfsInt(it) }?.let { type ->
+            if (type > 0) return mapChargeTechInt(type)
+        }
+        // 4) The active USB supply type. A basic port (DCP/SDP/CDP) is a slow charge
+        //    with no fast protocol — the app reports this as "DCP", so it maps to the
+        //    orange slow tone rather than inheriting the stale SVOOC code below.
+        if (isBasicUsb(readUsbTypeActive())) return ChargeProtocol.SLOW
+        // 5) `charge_technology`: protocol-name string on most Oplus builds, integer code
+        //    on this PLK110 one. Only honoured when the USB link is not a basic port, so a
+        //    lingering `14` while the phone has dropped to a trickle DCP charge is ignored.
         CHARGE_TECHNOLOGY_PATHS.firstNotNullOfOrNull { readSysfsLine(it) }?.let { tech ->
             val up = tech.uppercase()
             if (up.contains("SUPERVOOC") || up.contains("VOOC")) return ChargeProtocol.SUPER_VOOC
             if (up.contains("UFCS")) return ChargeProtocol.UFCS
             if (up.contains("PPS")) return ChargeProtocol.PPS
             if (up.contains("PD")) return ChargeProtocol.PPS // PD/PPS family → blue
-            tech.toIntOrNull()?.let { return mapChargeTechInt(it) }
-        }
-        // 4) `charge_type` integer — the app's primary protocol source when the flags
-        //    above are unset.
-        CHARGE_TYPE_PATHS.firstNotNullOfOrNull { readSysfsInt(it) }?.let { type ->
-            if (type > 0) return mapChargeTechInt(type)
+            tech.toIntOrNull()?.let { if (!isBasicUsb(readUsbTypeActive())) return mapChargeTechInt(it) }
         }
         return null
+    }
+
+    /**
+     * The kernel's `usb_type` node lists every supply type the port supports, with the
+     * *active* ones wrapped in `[brackets]`. During a basic trickle charge it looks like
+     * `[Unknown] SDP [DCP] …` (or `[DCP] …` on other firmwares). We collect all bracketed
+     * tokens and, if any of them is a plain port (DCP/SDP/CDP), report that — this is the
+     * signal the 电池检测 app uses to show "DCP" / "专用充电器" for a basic charge. Falling
+     * back to the whole raw line keeps us compatible with firmwares that bracket a single
+     * active type (e.g. `[Unknown]` at rest).
+     */
+    private fun readUsbTypeActive(): String? {
+        val raw = readSysfsLine(USB_TYPE_PATH) ?: return null
+        val active = Regex("\\[([^\\]]+)]").findAll(raw)
+            .map { it.groupValues[1].trim() }
+            .filter { it.isNotEmpty() }
+            .toList()
+        val candidates = if (active.isNotEmpty()) active else listOf(raw.trim())
+        return (candidates.firstOrNull { isBasicUsb(it) } ?: candidates.first()).uppercase()
+    }
+
+    /** Whether the active USB link is a plain port with no fast-charge protocol. */
+    private fun isBasicUsb(type: String?): Boolean {
+        if (type == null) return false
+        return type.contains("DCP") || type.contains("SDP") || type.contains("CDP")
     }
 
     /**
@@ -284,8 +324,9 @@ class SystemStateSource(
             val type = CHARGE_TYPE_PATHS.firstNotNullOfOrNull { readSysfsLine(it) } ?: "n/a"
             val voocIng = readSysfsLine(VOOC_ING_PATH) ?: "n/a"
             val ppsIng = readSysfsLine(PPS_ING_PATH) ?: "n/a"
+            val usbType = readUsbTypeActive() ?: "n/a"
             XposedBridge.log(
-                "3IN1: charge protocol=$protocol (sysfs=$sysfs node=[tech=$tech type=$type voocIng=$voocIng ppsIng=$ppsIng]) " +
+                "3IN1: charge protocol=$protocol (sysfs=$sysfs node=[tech=$tech type=$type voocIng=$voocIng ppsIng=$ppsIng usb=$usbType]) " +
                     "negotiated=${negotiatedVoltageMv}mV/${negotiatedCurrentMa}mA " +
                     "oplus=[fastType=$oplusFastType ppsMode=$oplusPpsMode tech=$oplusChargeTechnology " +
                     "plugged=$oplusChargePlugged fast=$oplusFastCharger v=${oplusChargerVoltageMv}mV w=${oplusWatts}] " +

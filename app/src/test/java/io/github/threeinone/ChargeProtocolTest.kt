@@ -32,6 +32,9 @@ class ChargeProtocolTest {
         voltageMv, currentMa, wattage, chargerVoltageMv, charging
     )
 
+    /** A charger that negotiates the UFCS high rail. */
+    private val ufcsHigh = 12000
+
     @Test fun originalChargerIsRecognisedByItsTechnologyLevel() {
         // The charging IC reports the capabilities of the charger: the original
         // OnePlus charger reaches the VOOC level, a plain USB charger stays at 0.
@@ -52,6 +55,16 @@ class ChargeProtocolTest {
         assertEquals(
             ChargeProtocol.UFCS,
             detect(chargeTech = 14, chargeTechnology = 0, plugged = 1, wattage = 30,
+                voltageMv = 12000, chargerVoltageMv = 12000)
+        )
+    }
+
+    @Test fun aPpsChargerIsRecognisedByItsNegotiatedVoltage() {
+        // PPS negotiates in 9 V steps and stays below the UFCS rail. The firmware
+        // reports the same charge type for both, so the voltage separates them.
+        assertEquals(
+            ChargeProtocol.PPS,
+            detect(chargeTech = 14, chargeTechnology = 0, plugged = 1, wattage = 18,
                 voltageMv = 9000, chargerVoltageMv = 9000)
         )
     }
@@ -74,7 +87,7 @@ class ChargeProtocolTest {
         assertEquals(
             ChargeProtocol.UFCS,
             detect(chargeTech = 14, ppsMode = 4, fastCharger = true, plugged = 1,
-                voltageMv = 9000, chargerVoltageMv = 9000)
+                voltageMv = 12000, chargerVoltageMv = 12000)
         )
     }
 
@@ -124,8 +137,8 @@ class ChargeProtocolTest {
         // original charger — the charging state is what keeps the colour.
         assertEquals(
             ChargeProtocol.UFCS,
-            detect(chargeTech = 14, plugged = 1, wattage = 0, voltageMv = 9000,
-                chargerVoltageMv = 9000, charging = true)
+            detect(chargeTech = 14, plugged = 1, wattage = 0, voltageMv = 12000,
+                chargerVoltageMv = 12000, charging = true)
         )
         assertEquals(
             ChargeProtocol.SUPER_VOOC,
