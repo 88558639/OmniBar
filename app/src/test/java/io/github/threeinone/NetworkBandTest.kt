@@ -84,6 +84,28 @@ class NetworkBandTest {
         return a
     }
 
+    /**
+     * The bounding box of the solid ink inside a unit box, in units.
+     *
+     * The faded fan counts as ink too, so the mark itself can only be measured by
+     * the pixels that are actually solid.
+     */
+    private fun solidBox(b: Bitmap, x0: Float, x1: Float, y0: Float, y1: Float): FloatArray? {
+        var minX = Float.MAX_VALUE; var maxX = -1f; var minY = Float.MAX_VALUE; var maxY = -1f
+        for (y in (y0 * px).toInt()..(y1 * px).toInt()) {
+            for (x in (x0 * px).toInt()..(x1 * px).toInt()) {
+                if (Color.alpha(b.getPixel(x, y)) >= 200) {
+                    if (x < minX) minX = x.toFloat()
+                    if (x > maxX) maxX = x.toFloat()
+                    if (y < minY) minY = y.toFloat()
+                    if (y > maxY) maxY = y.toFloat()
+                }
+            }
+        }
+        if (maxX < 0) return null
+        return floatArrayOf(minX / px, minY / px, maxX / px, maxY / px)
+    }
+
     private val demo get() = IndicatorState.demo
 
     // ------------------------------------------------------------------ Wi-Fi markers
@@ -96,14 +118,51 @@ class NetworkBandTest {
         for (phase in listOf(WifiPhase.NO_INTERNET, WifiPhase.CAPTIVE)) {
             val marked = render(demo.copy(wifi = phase))
             // The fan's own box, so that only the mark is measured.
-            val box = inkBox(marked, 30f, 70f, 40f, 78f)
+            val box = inkBox(marked, 30f, 70f, 38f, 78f)
             assertNotNull("$phase: the mark is missing", box)
             val centreX = (box!![0] + box[2]) / 2f
-            val centreY = (box[1] + box[3]) / 2f
+            val centreY = (box!![1] + box[3]) / 2f
             assertEquals("$phase: the mark is not centred on the fan", 50f, centreX, 2f)
             assertEquals("$phase: the mark is not centred in the fan",
-                IndicatorRenderer.WIFI_MARK_CENTER_Y, centreY, 4f)
+                IndicatorRenderer.WIFI_MARK_TOP + IndicatorRenderer.WIFI_MARK_HEIGHT / 2f,
+                centreY, 5f)
         }
+    }
+
+    /**
+     * The mark has to be big enough to notice at all.
+     *
+     * At 28 units the "!" and "?" were there but read as a speck, so the glyph now
+     * fills the height of the fan. This test keeps it from shrinking back.
+     */
+    /**
+     * The mark has to be big enough to notice at all.
+     *
+     * At 28 units the "!" and "?" were there but read as a speck. The glyph is now
+     * scaled to fill the slot from the top of the outer arc down to the dot, so the
+     * test pins that slot rather than a point size — the fonts differ per device.
+     */
+    @Test fun theWifiMarkIsBigEnoughToNotice() {
+        val bang = solidBox(render(demo.copy(wifi = WifiPhase.NO_INTERNET)), 34f, 66f, 34f, 80f)
+        val question = solidBox(render(demo.copy(wifi = WifiPhase.CAPTIVE)), 34f, 66f, 34f, 80f)
+        assertNotNull("The ! is missing", bang)
+        assertNotNull("The ? is missing", question)
+        // It fills the slot: from the top of the outer arc down to the dot.
+        assertEquals("The ! does not fill the slot: ${bang!!.toList()}",
+            IndicatorRenderer.WIFI_MARK_HEIGHT, bang[3] - bang[1], 3f)
+        assertEquals("The ? does not fill the slot: ${question!!.toList()}",
+            IndicatorRenderer.WIFI_MARK_HEIGHT, question[3] - question[1], 3f)
+        // The "?" is wider than the stem of the "!", but it still has to be a glyph.
+        assertTrue("The ? is too narrow: ${question.toList()}", question[2] - question[0] >= 12f)
+        // The mark has to reach over the top of the outer arc, so that it covers the
+        // whole signal stack instead of hiding between the arcs.
+        assertEquals("The ! does not start at the outer arc: ${bang.toList()}",
+            IndicatorRenderer.WIFI_MARK_TOP, bang[1], 2f)
+        assertEquals("The ? does not start at the outer arc: ${question.toList()}",
+            IndicatorRenderer.WIFI_MARK_TOP, question[1], 2f)
+        // Both have to stay inside the fan and off the signal dots.
+        assertTrue("The ! is off-centre: ${bang.toList()}", bang[0] > 40f && bang[2] < 60f)
+        assertTrue("The ? is off-centre: ${question.toList()}", question[0] > 36f && question[2] < 64f)
     }
 
     /**
@@ -178,10 +237,33 @@ class NetworkBandTest {
         val box = inkBox(noSignal, 20f, 80f, 40f, 70f)
         assertNotNull("The placeholder is missing", box)
         // Two solid bars: wide enough to read as a pair, thick enough not to vanish.
-        assertTrue("The placeholder is too narrow: ${box!!.toList()}", box[2] - box[0] >= 28f)
-        assertTrue("The placeholder is too thin: ${box.toList()}", box[3] - box[1] >= 4f)
+        assertTrue("The placeholder is too narrow: ${box!!.toList()}", box[2] - box[0] >= 40f)
+        assertTrue("The placeholder is too thin: ${box.toList()}", box[3] - box[1] >= 6f)
         // It must not look like a network type: a dash pair has no ascender.
         assertTrue("The placeholder is too tall: ${box.toList()}", box[3] - box[1] <= 12f)
+        // It must stay clear of the signal dot columns.
+        assertTrue("The placeholder runs into the signal dots: ${box.toList()}", box[0] > 12f)
+        assertTrue("The placeholder runs into the signal dots: ${box.toList()}", box[2] < 88f)
+    }
+
+    /**
+     * The connecting wave has to fill the fan it stands in.
+     *
+     * The bars were thin enough to read as a hairline at status bar size, so the whole
+     * group is wider and taller now.
+     */
+    @Test fun theConnectingWaveFillsTheFan() {
+        val bars = render(demo.copy(wifi = WifiPhase.CONNECTING), connectPhase = 1f / 6f)
+        // Only the solid bars — the faded fan behind them is not part of the wave.
+        val box = solidBox(bars, 25f, 75f, 38f, 78f)
+        assertNotNull("The wave is missing", box)
+        val width = box!![2] - box[0]
+        assertTrue("The wave is too narrow: ${box.toList()}", width >= 30f)
+        // The tallest bar reaches up to the top of the fan.
+        val top = barTop(bars, 0)
+        assertTrue("The wave is too flat: $top", top <= 48f)
+        // And it must not spill out of the fan either.
+        assertTrue("The wave is off-centre: ${box.toList()}", box[0] > 30f && box[2] < 70f)
     }
 
     /** An emergency-only SIM gets its own mark — "--" said nothing about it. */
@@ -244,6 +326,9 @@ class NetworkBandTest {
         assertFalse("The preview is still there", names.contains("Wi-Fi 关闭 · 5G"))
         assertFalse("The preview is still there", names.contains("Wi-Fi 未连接 · 4G"))
         assertFalse("The preview is still there", names.contains("移动数据关闭"))
+        // An unknown battery is not a state worth showing: the number is simply "?"
+        // and the arc stays empty.
+        assertFalse("The preview is still there", names.contains("电量未知"))
     }
 
     /**

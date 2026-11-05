@@ -55,6 +55,10 @@ class SettingsCopyTest {
                 .filterIsInstance<TextView>()
                 .map { it.text.toString() }
             assertFalse(texts.any { it.contains("其余跟随系统颜色") })
+            // The whole row opens the colour picker — the swatch on the left and the
+            // hex value on the right alike — so the note must not point at one side.
+            assertFalse(texts.any { it.contains("左侧色块上点击") })
+            assertTrue(texts.any { it.contains("点击整行") })
         } finally { controller.pause().stop().destroy() }
     }
 }

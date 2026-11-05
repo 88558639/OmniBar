@@ -110,13 +110,13 @@ class IndicatorRenderer {
         const val EMERGENCY_SIZE_RATIO = 0.74f
 
         /** Length of one bar of the "--" placeholder. */
-        const val PLACEHOLDER_BAR_WIDTH = 13f
+        const val PLACEHOLDER_BAR_WIDTH = 17.5f
 
         /** Thickness of one bar. */
-        const val PLACEHOLDER_BAR_HEIGHT = 5f
+        const val PLACEHOLDER_BAR_HEIGHT = 7.5f
 
         /** Gap between the two bars. */
-        const val PLACEHOLDER_BAR_GAP = 6f
+        const val PLACEHOLDER_BAR_GAP = 9f
 
         /**
          * The faint "sim" is a word rather than an abbreviation, so it is drawn a little
@@ -139,38 +139,48 @@ class IndicatorRenderer {
         const val WIFI_MARKED_ALPHA_RATIO = 0.26f
 
         /**
-         * Size of the mark in the middle of the fan.
+         * Reference size of the mark in the middle of the fan.
          *
-         * It has to fill the fan to read as part of it, so it is drawn big enough to
-         * stand between the arcs — but never wider than the fan itself.
+         * The real size is worked out from the glyph itself, so that the mark ends up
+         * the same height on every device — the fonts differ too much for a fixed
+         * point size to look the same.
          */
-        const val WIFI_MARK_SIZE = 30f
+        const val WIFI_MARK_SIZE = 52f
 
         /** The mark may not spread wider than this. */
-        const val WIFI_MARK_MAX_WIDTH = 34f
+        const val WIFI_MARK_MAX_WIDTH = 42f
 
         /**
-         * Centre of the mark inside the fan.
+         * Top of the mark, in indicator units.
          *
-         * The fan runs from the top of its outer arc (y = 45) down to the dot
-         * (y = 73), so its middle is around y = 59. The mark is centred there.
+         * The outer arc of the fan reaches up to y = 45 (its stroke reaches 43), so
+         * the mark starts a little above that: it covers the whole signal stack
+         * instead of hiding between the arcs.
          */
-        const val WIFI_MARK_CENTER_Y = 59f
+        const val WIFI_MARK_TOP = 42f
+
+        /**
+         * Height of the mark, from its top down past the dot of the fan.
+         *
+         * The glyph is scaled to exactly this height, whatever the font does, so that
+         * the mark always fills the same slot in the fan.
+         */
+        const val WIFI_MARK_HEIGHT = 32f
 
         /** Width of one bar of the connecting animation. */
-        const val CONNECT_BAR_WIDTH = 4.6f
+        const val CONNECT_BAR_WIDTH = 6.3f
 
         /** Gap between two bars. */
-        const val CONNECT_BAR_GAP = 5.4f
+        const val CONNECT_BAR_GAP = 6.6f
 
         /** Baseline the bars grow from. */
-        const val CONNECT_BAR_BASELINE = 71f
+        const val CONNECT_BAR_BASELINE = 72f
 
-        /** Height of a bar at its peak. */
-        const val CONNECT_BAR_MAX = 19f
+        /** Height of a bar at its peak — it reaches the top of the fan. */
+        const val CONNECT_BAR_MAX = 26f
 
         /** Height of a bar at its lowest — it never disappears completely. */
-        const val CONNECT_BAR_MIN = 5f
+        const val CONNECT_BAR_MIN = 6.5f
 
         /**
          * Largest the charging bolt may get.
@@ -619,18 +629,40 @@ class IndicatorRenderer {
         canvas.drawCircle(50f, WIFI_CENTER_Y, 3.4f, paint)
         canvas.restoreToCount(wSave)
         if (mark != null) {
-            // The mark sits in the middle of the fan and keeps the full tint, so it
-            // reads as the loud part of the glyph.
-            val size = WIFI_MARK_SIZE
-            prepareText(mark, size, tint, WIFI_MARK_MAX_WIDTH)
-            val glyphs = Rect()
-            paint.getTextBounds(mark, 0, mark.length, glyphs)
-            val baseline = WIFI_MARK_CENTER_Y - glyphs.top - glyphs.height() / 2f
-            canvas.drawText(mark, 50f, baseline, paint)
+            drawWifiMark(canvas, mark, tint)
         }
         if (state.wifi == WifiPhase.CONNECTING) {
             drawConnectingBars(canvas, tint, connectPhase)
         }
+    }
+
+    /**
+     * The "!" and "?" that tell the two broken Wi-Fi states apart.
+     *
+     * The mark is anchored by its top, not by its centre: it starts at the top of the
+     * outer arc and reaches down to the dot, so it covers the whole signal stack.
+     * The glyph is scaled to that slot by measuring it first — the fonts of the
+     * different devices draw a "?" at quite different heights, and a fixed point size
+     * would leave the mark floating below the arc on some of them.
+     */
+    private fun drawWifiMark(canvas: Canvas, mark: String, tint: Int) {
+        val glyphs = Rect()
+        var size = WIFI_MARK_SIZE
+        // Two rounds: the first one measures the glyph, the second one measures the
+        // scaled glyph. The width limit may shrink the size again, so it is measured
+        // once more before the mark is placed.
+        repeat(2) {
+            prepareText(mark, size, tint, WIFI_MARK_MAX_WIDTH)
+            paint.getTextBounds(mark, 0, mark.length, glyphs)
+            val height = glyphs.height().toFloat()
+            if (height <= 0f) return
+            size = size * WIFI_MARK_HEIGHT / height
+        }
+        prepareText(mark, size, tint, WIFI_MARK_MAX_WIDTH)
+        paint.getTextBounds(mark, 0, mark.length, glyphs)
+        // The top of the glyph sits on WIFI_MARK_TOP, so the baseline follows its ascent.
+        val baseline = WIFI_MARK_TOP - glyphs.top
+        canvas.drawText(mark, 50f, baseline, paint)
     }
 
     /**

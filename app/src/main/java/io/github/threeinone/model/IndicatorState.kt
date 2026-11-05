@@ -117,7 +117,6 @@ data class IndicatorState(
             "严重低电量" to demo.copy(battery = 5),
             "省电模式" to demo.copy(battery = 45, powerSave = true),
             "插电未充电 / 限充" to demo.copy(battery = 80, batteryPhase = BatteryPhase.PAUSED),
-            "电量未知" to demo.copy(battery = -1, batteryPhase = BatteryPhase.UNKNOWN),
             "Wi-Fi 弱信号" to demo.copy(wifiLevel = 1, mobileLevel = 1),
             "Wi-Fi 无互联网" to demo.copy(wifi = WifiPhase.NO_INTERNET),
             "Wi-Fi 需要登录" to demo.copy(wifi = WifiPhase.CAPTIVE),
