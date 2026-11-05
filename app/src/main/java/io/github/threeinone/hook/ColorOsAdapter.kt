@@ -658,7 +658,16 @@ class ColorOsAdapter(private val loader: ClassLoader) {
         }
     }
 
-    /** Hide the native Wi-Fi / mobile icons and blank their slots. */
+    /**
+     * Hide the native Wi-Fi / mobile / airplane icons and blank their slots.
+     *
+     * Two mechanisms, because the icons live in different places on this firmware:
+     *  - `addIgnoredSlot` on the `StatusIconContainer` drops the network icons from the
+     *    measurement pass, so they lose their space as well as their artwork;
+     *  - the airplane icon is a `StatIconView` in a **sibling** container, so it is not
+     *    reached by the slot list at all. It is matched by its slot name and hidden
+     *    directly — otherwise the status bar shows the native plane next to the drawn one.
+     */
     private fun suppress(view: View, session: Session) {
         if (view === session.host || view === session.indicator) return
         if (view.javaClass.name == ICONS) {
@@ -671,6 +680,10 @@ class ColorOsAdapter(private val loader: ClassLoader) {
                 }
             }
         }
+        if (slotOf(view) in TAKEOVER_SLOTS) {
+            hide(view, session)
+            return
+        }
         val simpleName = view.javaClass.simpleName
         if (simpleName.contains("StatusBarMobileView") || simpleName.contains("StatusBarWifiView")) {
             hide(view, session)
@@ -680,6 +693,9 @@ class ColorOsAdapter(private val loader: ClassLoader) {
             for (i in 0 until view.childCount) suppress(view.getChildAt(i), session)
         }
     }
+
+    /** The slot name of an icon view, or an empty string when it does not have one. */
+    private fun slotOf(view: View): String = slotNameOf(view)
 
     private fun hideNativeBattery(session: Session) {
         for (i in 0 until session.host.childCount) {
@@ -806,6 +822,40 @@ class ColorOsAdapter(private val loader: ClassLoader) {
             "com.oplus.systemui.statusbar.pipeline.battery.ui.model.BatteryIconColor"
         const val WIFI_ACTIVITY_CALLBACK =
             "com.android.systemui.statusbar.pipeline.wifi.data.repository.prod.WifiRepositoryImpl\$wifiActivity\$1\$callback\$1"
-        val NETWORK_SLOTS = listOf("wifi", "mobile", "stacked_mobile")
+        /**
+         * The native status bar slots the indicator takes over.
+         *
+         * `StatusIconContainer` keeps a set of ignored slots: a child whose `getSlot()`
+         * matches one of them is left out of the measurement pass, so the icon disappears
+         * and its space is given to the next one. The names come from the framework
+         * strings `status_bar_wifi` / `status_bar_mobile` / `status_bar_airplane_slot`.
+         *
+         * "airplane" matters because the indicator draws the flight-mode plane itself
+         * (it replaces the Wi-Fi fan in the middle band). Without ignoring that slot the
+         * status bar shows the native plane *and* the drawn one — two planes side by side.
+         */
+        val NETWORK_SLOTS = listOf("wifi", "mobile", "stacked_mobile", "airplane")
+
+        /**
+         * The slots whose native icon view is hidden outright.
+         *
+         * The airplane icon is a `StatIconView` that lives outside the `StatusIconContainer`
+         * the slot list applies to, so it has to be hidden by view. Its slot name comes
+         * from the framework string `status_bar_airplane_slot` ("airplane"), the same
+         * naming the other system status icons use.
+         */
+        val TAKEOVER_SLOTS = setOf("airplane")
+
+        /**
+         * Reads the slot name an icon view reports.
+         *
+         * Every icon view implements `StatusIconDisplayable.getSlot()`; the name comes
+         * from the framework strings (`status_bar_alarm`, `status_bar_airplane_slot`, …).
+         * A view without that method — the indicator itself, plain containers — has no
+         * slot and is never taken over.
+         */
+        internal fun slotNameOf(view: View): String = runCatching {
+            view.javaClass.getMethod("getSlot").invoke(view) as? String
+        }.getOrNull().orEmpty()
     }
 }
