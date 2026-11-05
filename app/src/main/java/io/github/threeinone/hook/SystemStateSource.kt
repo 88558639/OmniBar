@@ -104,20 +104,32 @@ class SystemStateSource(
     private var lastSysfsProtocol: ChargeProtocol? = null
 
     /**
-     * Oplus sysfs node that carries the negotiated charge technology as a string
-     * (VOOC / SUPERVOOC / UFCS / PPS / PD …). This is the exact source the
-     * `*#899#` engineering-mode "快充模式" field and the 电池检测 app read, so it is
-     * the ground truth for which protocol is actually running — and it matches what
-     * the user sees there.
+     * Oplus sysfs nodes that carry the negotiated charging protocol. These are the
+     * exact sources the 电池检测 app (`com.shellterm.batterycheck`) and the `*#899#`
+     * engineering-mode "快充模式" field read, so the indicator's colour now matches
+     * what the user sees there.
+     *
+     * The app resolves the displayed protocol in this priority (its `fastChargeText`):
+     *   1. `voocchg_ing` == 1            → original OnePlus/OPPO SuperVOOC rail (violet)
+     *   2. `ppschg_ing`   == 4            → UFCS third-party charger (green)
+     *   3. `ppschg_ing`   == 2            → PPS charger (blue)
+     *   4. `charge_type` integer          → 14=SVOOC, 16=PD, 8=VOOC, 2=normal
+     *   5. `charge_technology` str/int    → VOOC/SUPERVOOC/UFCS/PPS/PD (name or code)
+     *
+     * On this PLK110 firmware `charge_technology` reports an integer (e.g. `14`)
+     * rather than the protocol-name string other Oplus builds expose, so both forms
+     * are handled below.
      */
+    private val VOOC_ING_PATH = "/sys/class/oplus_chg/battery/voocchg_ing"
+    private val PPS_ING_PATH = "/sys/class/oplus_chg/battery/ppschg_ing"
     private val CHARGE_TECHNOLOGY_PATHS = listOf(
         "/sys/class/oplus_chg/battery/charge_technology"
     )
 
     /**
      * Oplus sysfs node that carries the charge type as an integer (0 none, 2 normal,
-     * 8 VOOC-basic, 14 SuperVOOC, 16 PD …). Confirms the protocol when the string
-     * node above is empty.
+     * 8 VOOC-basic, 14 SuperVOOC, 16 PD …). The app's primary protocol source when the
+     * `voocchg_ing` / `ppschg_ing` flags above are unset.
      */
     private val CHARGE_TYPE_PATHS = listOf(
         "/sys/class/power_supply/battery/charge_type",
@@ -200,35 +212,62 @@ class SystemStateSource(
         f.bufferedReader().use { it.readLine()?.trim() }
     }.getOrNull()?.takeIf { it.isNotEmpty() }
 
+    /** Reads an integer sysfs node, returning null when it is missing / unreadable / not numeric. */
+    private fun readSysfsInt(path: String): Int? = readSysfsLine(path)?.toIntOrNull()
+
     /**
      * Reads the negotiated charge protocol straight from the Oplus charging driver's
-     * sysfs nodes — the same data the `*#899#` engineering mode and the 电池检测 app
-     * display, so the indicator's colour now matches the "快充模式" the user sees there.
+     * sysfs nodes — the same data the `*#899#` engineering mode "快充模式" field and the
+     * 电池检测 app display, resolved in the exact priority that app uses
+     * (`fastChargeText`):
      *
-     * `charge_technology` reports the protocol as a string; `charge_type` reports it
-     * as an integer (14 = SuperVOOC, 16 = PD, 8 = VOOC-basic). Either one is
-     * authoritative; the broadcast / voltage heuristic below is only a fallback for
-     * devices where these Oplus nodes are absent.
+     *  1. `voocchg_ing` == 1 → original OnePlus/OPPO SuperVOOC rail (violet)
+     *  2. `ppschg_ing`   == 4 → third-party UFCS charger (green)
+     *  3. `ppschg_ing`   == 2 → PPS charger (blue)
+     *  4. `charge_technology` / `charge_type` integer or name → mapped below
+     *
+     * `charge_technology` is a protocol-name string on most Oplus firmwares but an
+     * integer code (e.g. `14`) on this PLK110 build, so both forms are handled. The
+     * caller only invokes this while charging, which keeps the stale value the node
+     * can hold while idle from leaking through.
      */
     private fun protocolFromSysfs(): ChargeProtocol? {
-        val tech = CHARGE_TECHNOLOGY_PATHS.firstNotNullOfOrNull { readSysfsLine(it) }
-        if (tech != null) {
+        // 1) Original OnePlus/OPPO SuperVOOC rail — only the proprietary charger sets this.
+        if (readSysfsInt(VOOC_ING_PATH) == 1) return ChargeProtocol.SUPER_VOOC
+        // 2) Public fast-charge protocols, split by what the charger IC reports.
+        when (readSysfsInt(PPS_ING_PATH)) {
+            4 -> return ChargeProtocol.UFCS // third-party UFCS charger
+            2 -> return ChargeProtocol.PPS  // PPS charger
+        }
+        // 3) `charge_technology`: a protocol-name string on most Oplus builds, but an
+        //    integer code on this PLK110 firmware, so handle both.
+        CHARGE_TECHNOLOGY_PATHS.firstNotNullOfOrNull { readSysfsLine(it) }?.let { tech ->
             val up = tech.uppercase()
-            return when {
-                up.contains("SUPERVOOC") || up.contains("VOOC") -> ChargeProtocol.SUPER_VOOC
-                up.contains("UFCS") -> ChargeProtocol.UFCS
-                up.contains("PPS") -> ChargeProtocol.PPS
-                up.contains("PD") -> ChargeProtocol.FAST
-                else -> null
-            }
+            if (up.contains("SUPERVOOC") || up.contains("VOOC")) return ChargeProtocol.SUPER_VOOC
+            if (up.contains("UFCS")) return ChargeProtocol.UFCS
+            if (up.contains("PPS")) return ChargeProtocol.PPS
+            if (up.contains("PD")) return ChargeProtocol.PPS // PD/PPS family → blue
+            tech.toIntOrNull()?.let { return mapChargeTechInt(it) }
         }
-        val type = CHARGE_TYPE_PATHS.firstNotNullOfOrNull { readSysfsLine(it) }?.toIntOrNull()
-        return when (type) {
-            14 -> ChargeProtocol.SUPER_VOOC
-            16 -> ChargeProtocol.FAST
-            8 -> ChargeProtocol.SUPER_VOOC
-            else -> null
+        // 4) `charge_type` integer — the app's primary protocol source when the flags
+        //    above are unset.
+        CHARGE_TYPE_PATHS.firstNotNullOfOrNull { readSysfsInt(it) }?.let { type ->
+            if (type > 0) return mapChargeTechInt(type)
         }
+        return null
+    }
+
+    /**
+     * Maps an Oplus `charge_type` / `charge_technology` integer code onto a protocol,
+     * matching the 电池检测 app's `protocolName` table
+     * (0=none, 2=normal, 8=VOOC-basic, 14=SVOOC, 16=PD) plus the user's colour scheme.
+     */
+    private fun mapChargeTechInt(code: Int): ChargeProtocol = when (code) {
+        14 -> ChargeProtocol.SUPER_VOOC // SVOOC — original OnePlus/OPPO rail
+        8 -> ChargeProtocol.SUPER_VOOC  // VOOC-basic — original OnePlus/OPPO rail
+        16 -> ChargeProtocol.PPS        // PD / PPS family — USB-C fast charge
+        2 -> ChargeProtocol.SLOW        // normal 5V/9V — plain charger (orange)
+        else -> ChargeProtocol.FAST     // any other fast code
     }
 
     private fun applyProtocol() {
@@ -243,8 +282,10 @@ class SystemStateSource(
         ) {
             val tech = CHARGE_TECHNOLOGY_PATHS.firstNotNullOfOrNull { readSysfsLine(it) } ?: "n/a"
             val type = CHARGE_TYPE_PATHS.firstNotNullOfOrNull { readSysfsLine(it) } ?: "n/a"
+            val voocIng = readSysfsLine(VOOC_ING_PATH) ?: "n/a"
+            val ppsIng = readSysfsLine(PPS_ING_PATH) ?: "n/a"
             XposedBridge.log(
-                "3IN1: charge protocol=$protocol (sysfs=$sysfs node=[tech=$tech type=$type]) " +
+                "3IN1: charge protocol=$protocol (sysfs=$sysfs node=[tech=$tech type=$type voocIng=$voocIng ppsIng=$ppsIng]) " +
                     "negotiated=${negotiatedVoltageMv}mV/${negotiatedCurrentMa}mA " +
                     "oplus=[fastType=$oplusFastType ppsMode=$oplusPpsMode tech=$oplusChargeTechnology " +
                     "plugged=$oplusChargePlugged fast=$oplusFastCharger v=${oplusChargerVoltageMv}mV w=${oplusWatts}] " +
