@@ -114,6 +114,7 @@ data class IndicatorState(
             "充电中" to demo.copy(battery = 56, batteryPhase = BatteryPhase.CHARGING),
             "已充满" to demo.copy(battery = 100, batteryPhase = BatteryPhase.FULL),
             "低电量" to demo.copy(battery = 12),
+            "严重低电量" to demo.copy(battery = 5),
             "省电模式" to demo.copy(battery = 45, powerSave = true),
             "插电未充电 / 限充" to demo.copy(battery = 80, batteryPhase = BatteryPhase.PAUSED),
             "电量未知" to demo.copy(battery = -1, batteryPhase = BatteryPhase.UNKNOWN),
@@ -121,9 +122,6 @@ data class IndicatorState(
             "Wi-Fi 无互联网" to demo.copy(wifi = WifiPhase.NO_INTERNET),
             "Wi-Fi 需要登录" to demo.copy(wifi = WifiPhase.CAPTIVE),
             "Wi-Fi 连接中" to demo.copy(wifi = WifiPhase.CONNECTING),
-            "Wi-Fi 关闭 · 5G" to demo.copy(wifi = WifiPhase.OFF),
-            "Wi-Fi 未连接 · 4G" to demo.copy(wifi = WifiPhase.DISCONNECTED, networkType = "4G"),
-            "移动数据关闭" to demo.copy(wifi = WifiPhase.OFF, dataEnabled = false),
             "无信号" to demo.copy(wifi = WifiPhase.OFF, sim = SimPhase.NO_SIGNAL, mobileLevel = 0),
             "仅紧急呼叫" to demo.copy(wifi = WifiPhase.OFF, sim = SimPhase.EMERGENCY),
             // A missing, a disabled and a locked SIM all read the same in the band — a
@@ -131,17 +129,15 @@ data class IndicatorState(
             // ones.
             "无 SIM 卡 · 停用 · 锁定" to demo.copy(wifi = WifiPhase.OFF, sim = SimPhase.ABSENT),
             "飞行模式" to demo.copy(wifi = WifiPhase.OFF, airplane = true),
-            "飞行模式 · Wi-Fi" to demo.copy(airplane = true),
-            "漫游" to demo.copy(wifi = WifiPhase.OFF, roaming = true),
             "VPN" to demo.copy(vpn = true),
+            // The second card is a plain one: both columns keep the tint, so the
+            // preview shows the ring instead of a colour demo.
             "双卡信号" to demo.copy(
                 sims = listOf(
                     IndicatorSim(slot = 0, phase = SimPhase.READY, level = 4, dataDefault = true),
-                    IndicatorSim(slot = 1, phase = SimPhase.READY, level = 2, roaming = true)
+                    IndicatorSim(slot = 1, phase = SimPhase.READY, level = 2)
                 )
-            ),
-            "数据上下行" to demo.copy(wifi = WifiPhase.OFF, networkType = "5G",
-                mobileActivity = DataActivity.BOTH)
+            )
         )
         fun networkLabel(type: Int, overrideType: Int): String = when {
             type == 20 || overrideType in setOf(3, 4, 5) -> "5G"

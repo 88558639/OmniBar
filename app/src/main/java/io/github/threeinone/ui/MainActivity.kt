@@ -243,12 +243,14 @@ class MainActivity : Activity() {
 
     private fun buildGroups() {
         section("状态颜色").apply {
-            textRow("启用状态颜色", "按电量与省电状态自动着色")
+            textRow("启用状态颜色", "按电量与省电状态自动着色，与状态栏实时显示一致")
             colorRow("低电量", "lowColor", 0xFFE7433A.toInt())
-            colorRow("严重电量", "criticalColor", 0xFFD50000.toInt())
+            colorRow("严重低电量", "criticalColor", 0xFFD50000.toInt())
             colorRow("省电模式", "saverColor", 0xFFFFB300.toInt())
-            hint("低电量与严重电量的分界沿用上次保存的阈值（默认 20% 与 10%），" +
-                "颜色在左侧色块上点击即可修改。")
+            hint("判定顺序：充电中或已充满用充电配色；电量 ≤ 10% 用「严重低电量」色；" +
+                "≤ 20% 用「低电量」色；开启系统省电模式用「省电模式」色；" +
+                "其余跟随系统颜色。颜色在左侧色块上点击即可修改；" +
+                "为保证对比度，状态栏里的实际颜色会按背景做少量校正。")
         }
 
         section("充电配色").apply {

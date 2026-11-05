@@ -118,31 +118,43 @@ class IndicatorRenderer {
         const val PLACEHOLDER_BAR_GAP = 6f
 
         /**
-         * The faint "sim" is a word rather than an abbreviation, so it is drawn small
-         * enough to fit between the signal dots.
+         * The faint "sim" is a word rather than an abbreviation, so it is drawn a little
+         * smaller than a network type — but it still has to fill the ring's inner
+         * space, so it stays large enough to read at status bar size.
          */
-        const val SIM_SIZE_RATIO = 0.62f
+        const val SIM_SIZE_RATIO = 0.95f
 
         /** How pale the "sim" word is drawn — it is a remark, not a headline. */
         const val SIM_DIM_ALPHA = 92
 
         /**
-         * Where the Wi-Fi state marker hangs.
+         * How pale the Wi-Fi fan gets when it carries a state mark.
          *
-         * "!" (no internet), "?" (needs a login) and "..." (connecting) used to be drawn
-         * right on top of the fan: the mark sat on the end of the outer arc and the dots
-         * of "..." lay across the inner one, so glyph and mark merged into one blob.
-         *
-         * They now hang in the top right corner of the fan's own box — the wedge between
-         * the percentage above and the arc's shoulder below, where nothing else is drawn.
+         * The space in the status bar is too tight for a mark beside the fan, so the
+         * fan itself carries the message: it fades out and the mark sits in its
+         * middle. The pale fan says "this is a Wi-Fi problem", the solid mark in the
+         * middle says which one.
          */
-        const val WIFI_MARKER_X = 72f
+        const val WIFI_MARKED_ALPHA_RATIO = 0.26f
 
-        /** Baseline of the marker; the outer arc only reaches up to y = 42. */
-        const val WIFI_MARKER_BASELINE = 44f
+        /**
+         * Size of the mark in the middle of the fan.
+         *
+         * It has to fill the fan to read as part of it, so it is drawn big enough to
+         * stand between the arcs — but never wider than the fan itself.
+         */
+        const val WIFI_MARK_SIZE = 28f
 
-        /** Size of the marker. */
-        const val WIFI_MARKER_SIZE = 12f
+        /** The mark may not spread wider than this. */
+        const val WIFI_MARK_MAX_WIDTH = 34f
+
+        /**
+         * Centre of the mark inside the fan.
+         *
+         * The fan runs from the top of its outer arc (y = 45) down to the dot
+         * (y = 73), so its middle is around y = 59. The mark is centred there.
+         */
+        const val WIFI_MARK_CENTER_Y = 59f
 
         /**
          * Largest the charging bolt may get.
@@ -558,6 +570,16 @@ class IndicatorRenderer {
     // ------------------------------------------------------------------ wifi
 
     private fun wifiFan(canvas: Canvas, config: IndicatorConfig, tint: Int, state: IndicatorState) {
+        // A fan that carries a state mark fades out: the mark in its middle is then
+        // the loud part, and the pale fan says that the problem is the Wi-Fi.
+        // A connecting fan is already faint, so it only gets the mark.
+        val mark = when (state.wifi) {
+            WifiPhase.NO_INTERNET -> "!"
+            WifiPhase.CAPTIVE -> "?"
+            WifiPhase.CONNECTING -> "..."
+            else -> null
+        }
+        val faded = state.wifi == WifiPhase.NO_INTERNET || state.wifi == WifiPhase.CAPTIVE
         val ws = min(config.wifiScale / 115f, 1.16f)
         val wSave = canvas.save()
         // Centred inside the dot ring: the fan's mass sits around y = 50..65, not up top.
@@ -569,22 +591,24 @@ class IndicatorRenderer {
             val radius = WIFI_ARC_RADII[i]
             bounds.set(50 - radius, WIFI_CENTER_Y - radius, 50 + radius, WIFI_CENTER_Y + radius)
             val active = state.wifi != WifiPhase.CONNECTING && bars > (WIFI_ARC_RADII.size - 1 - i)
-            stroke(tint, 5.5f * config.stroke / 100f * .72f, if (active) 255 else 55)
+            val alpha = if (active) 255 else 55
+            stroke(tint, 5.5f * config.stroke / 100f * .72f,
+                if (faded) (alpha * WIFI_MARKED_ALPHA_RATIO).toInt() else alpha)
             canvas.drawArc(bounds, 210f, 120f, false, paint)
         }
-        fill(tint, if (state.wifiLevel >= 1 && state.wifi != WifiPhase.CONNECTING) 255 else 55)
+        val dotAlpha = if (state.wifiLevel >= 1 && state.wifi != WifiPhase.CONNECTING) 255 else 55
+        fill(tint, if (faded) (dotAlpha * WIFI_MARKED_ALPHA_RATIO).toInt() else dotAlpha)
         canvas.drawCircle(50f, WIFI_CENTER_Y, 3.4f, paint)
         canvas.restoreToCount(wSave)
-        // The markers belong to the fan, but they must not touch it: they hang in the
-        // top right corner of the fan's box, where the percentage leaves room.
-        val marker = when (state.wifi) {
-            WifiPhase.NO_INTERNET -> "!"
-            WifiPhase.CAPTIVE -> "?"
-            WifiPhase.CONNECTING -> "..."
-            else -> null
-        }
-        if (marker != null) {
-            text(canvas, marker, WIFI_MARKER_X, WIFI_MARKER_BASELINE, WIFI_MARKER_SIZE, tint)
+        if (mark != null) {
+            // The mark sits in the middle of the fan and keeps the full tint, so it
+            // reads as the loud part of the glyph.
+            val size = WIFI_MARK_SIZE
+            prepareText(mark, size, tint, WIFI_MARK_MAX_WIDTH)
+            val glyphs = Rect()
+            paint.getTextBounds(mark, 0, mark.length, glyphs)
+            val baseline = WIFI_MARK_CENTER_Y - glyphs.top - glyphs.height() / 2f
+            canvas.drawText(mark, 50f, baseline, paint)
         }
     }
 
@@ -734,17 +758,6 @@ class IndicatorRenderer {
     private fun fill(color: Int, alpha: Int = 255) {
         paint.reset(); paint.isAntiAlias = true; paint.color = withAlpha(color, alpha)
         paint.style = Paint.Style.FILL
-    }
-
-    private fun text(c: Canvas, value: String, x: Float, baseline: Float, size: Float, color: Int,
-        maxWidth: Float = 100f, centerVertically: Boolean = false) {
-        prepareText(value, size, color, maxWidth)
-        val y = if (centerVertically) {
-            val glyphBounds = Rect()
-            paint.getTextBounds(value, 0, value.length, glyphBounds)
-            baseline - (glyphBounds.top + glyphBounds.bottom) / 2f
-        } else baseline
-        c.drawText(value, x, y, paint)
     }
 
     private fun prepareText(value: String, size: Float, color: Int, maxWidth: Float) {
