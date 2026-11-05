@@ -77,7 +77,12 @@ class MainActivity : Activity() {
                 .putBoolean("chargeColorAuto", true)
                 .commit()
         }
-        previewIndex = bundle?.getInt("preview", 0)?.coerceIn(IndicatorState.previews.indices) ?: 0
+        // The preview state can be picked from the intent — handy for screenshots and
+        // for tests that need one specific state — and it survives a configuration
+        // change in the saved instance state.
+        val requested = intent?.getIntExtra("preview", -1) ?: -1
+        previewIndex = (if (requested >= 0) requested else bundle?.getInt("preview", 0) ?: 0)
+            .coerceIn(IndicatorState.previews.indices)
         buildPage()
         if (normalized || published) scheduleSave()
     }

@@ -126,9 +126,10 @@ data class IndicatorState(
             "移动数据关闭" to demo.copy(wifi = WifiPhase.OFF, dataEnabled = false),
             "无信号" to demo.copy(wifi = WifiPhase.OFF, sim = SimPhase.NO_SIGNAL, mobileLevel = 0),
             "仅紧急呼叫" to demo.copy(wifi = WifiPhase.OFF, sim = SimPhase.EMERGENCY),
-            "无 SIM 卡" to demo.copy(wifi = WifiPhase.OFF, sim = SimPhase.ABSENT),
-            "SIM 停用" to demo.copy(wifi = WifiPhase.OFF, sim = SimPhase.DISABLED),
-            "SIM 锁定" to demo.copy(wifi = WifiPhase.OFF, sim = SimPhase.LOCKED),
+            // A missing, a disabled and a locked SIM all read the same in the band — a
+            // faint "sim" — so they share one preview instead of three near-identical
+            // ones.
+            "无 SIM 卡 · 停用 · 锁定" to demo.copy(wifi = WifiPhase.OFF, sim = SimPhase.ABSENT),
             "飞行模式" to demo.copy(wifi = WifiPhase.OFF, airplane = true),
             "飞行模式 · Wi-Fi" to demo.copy(airplane = true),
             "漫游" to demo.copy(wifi = WifiPhase.OFF, roaming = true),

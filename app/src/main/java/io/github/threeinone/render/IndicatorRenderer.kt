@@ -21,10 +21,15 @@ class IndicatorRenderer {
     /** Last logged column state; keeps the diagnostic line from repeating every frame. */
     private var lastColumnLog = ""
 
-    private companion object {
+    /**
+     * The layout of the indicator, in the 100-unit box the drawing is normalized to.
+     *
+     * The constants are public so that the tests can measure the marks against the
+     * same numbers the renderer draws them with.
+     */
+    companion object {
         /** Radius of the signal-dot ring. */
         const val RING_RADIUS = 44f
-
         /** Vertical centre of that ring. */
         const val RING_CENTER_Y = 53f
 
@@ -98,8 +103,46 @@ class IndicatorRenderer {
          */
         const val NETWORK_LABEL_MAX_WIDTH = 72f
 
-        /** The "--" placeholder is drawn smaller than a real network type. */
-        const val PLACEHOLDER_SIZE_RATIO = 0.62f
+        /**
+         * "SOS" is three letters, so it does not fit the band at the label size.
+         */
+        const val EMERGENCY_SIZE_RATIO = 0.74f
+
+        /** Length of one bar of the "--" placeholder. */
+        const val PLACEHOLDER_BAR_WIDTH = 13f
+
+        /** Thickness of one bar. */
+        const val PLACEHOLDER_BAR_HEIGHT = 5f
+
+        /** Gap between the two bars. */
+        const val PLACEHOLDER_BAR_GAP = 6f
+
+        /**
+         * The faint "sim" is a word rather than an abbreviation, so it is drawn small
+         * enough to fit between the signal dots.
+         */
+        const val SIM_SIZE_RATIO = 0.62f
+
+        /** How pale the "sim" word is drawn — it is a remark, not a headline. */
+        const val SIM_DIM_ALPHA = 92
+
+        /**
+         * Where the Wi-Fi state marker hangs.
+         *
+         * "!" (no internet), "?" (needs a login) and "..." (connecting) used to be drawn
+         * right on top of the fan: the mark sat on the end of the outer arc and the dots
+         * of "..." lay across the inner one, so glyph and mark merged into one blob.
+         *
+         * They now hang in the top right corner of the fan's own box — the wedge between
+         * the percentage above and the arc's shoulder below, where nothing else is drawn.
+         */
+        const val WIFI_MARKER_X = 72f
+
+        /** Baseline of the marker; the outer arc only reaches up to y = 42. */
+        const val WIFI_MARKER_BASELINE = 44f
+
+        /** Size of the marker. */
+        const val WIFI_MARKER_SIZE = 12f
 
         /**
          * Largest the charging bolt may get.
@@ -247,10 +290,8 @@ class IndicatorRenderer {
                 airplane(canvas, tint)
             } else if (state.wifiConnected || state.wifi == WifiPhase.CONNECTING) {
                 wifiFan(canvas, config, tint, state)
-            } else if (state.sim == SimPhase.READY) {
-                drawNetworkLabel(canvas, state.networkType.ifBlank { "--" }, config, tint)
             } else {
-                drawNetworkLabel(canvas, "--", config, tint, PLACEHOLDER_SIZE_RATIO)
+                drawNetworkFallback(canvas, state, config, tint)
             }
 
             drawSignalDots(canvas, state, config, tint, spread, dotRadius, ringRadius)
@@ -319,16 +360,64 @@ class IndicatorRenderer {
      * arc at the bottom — the width is clamped so it never reaches the signal dots.
      */
     private fun drawNetworkLabel(
-        canvas: Canvas, value: String, config: IndicatorConfig, tint: Int, ratio: Float = 1f
+        canvas: Canvas, value: String, config: IndicatorConfig, tint: Int, ratio: Float = 1f,
+        alpha: Int = 255
     ) {
         val size = (NETWORK_LABEL_BASE_SIZE * config.textScale / 100f * ratio)
             .coerceIn(NETWORK_LABEL_MIN_SIZE, NETWORK_LABEL_MAX_SIZE)
-        prepareText(value, size, tint, NETWORK_LABEL_MAX_WIDTH)
+        prepareText(value, size, withAlpha(tint, alpha), NETWORK_LABEL_MAX_WIDTH)
         val bounds = Rect()
         paint.getTextBounds(value, 0, value.length, bounds)
         // Centred in the band, so the label sits in the middle of the dot ring.
         val baseline = NETWORK_LABEL_CENTER - bounds.top - bounds.height() / 2f
         canvas.drawText(value, 50f, baseline, paint)
+    }
+
+    /**
+     * The middle band when there is no Wi-Fi fan to show.
+     *
+     * Every problem used to collapse into one tiny "--", so a phone without a SIM, a
+     * phone in flight mode and a phone without signal all looked the same — and the
+     * dash pair was so small that it disappeared in the status bar. Each case gets a
+     * mark of its own now:
+     *  - a ready SIM shows the network type ("4G" / "5G"),
+     *  - an emergency-only SIM shows "SOS", the mark Android itself uses,
+     *  - a missing, disabled or locked SIM shows a faint "sim",
+     *  - no signal at all shows the "--" placeholder.
+     */
+    private fun drawNetworkFallback(
+        canvas: Canvas, state: IndicatorState, config: IndicatorConfig, tint: Int
+    ) {
+        when (state.sim) {
+            SimPhase.READY -> {
+                val type = state.networkType
+                if (type.isBlank()) drawPlaceholder(canvas, tint)
+                else drawNetworkLabel(canvas, type, config, tint)
+            }
+            SimPhase.EMERGENCY -> drawNetworkLabel(canvas, "SOS", config, tint, EMERGENCY_SIZE_RATIO)
+            SimPhase.ABSENT, SimPhase.DISABLED, SimPhase.LOCKED ->
+                drawNetworkLabel(canvas, "sim", config, tint, SIM_SIZE_RATIO, SIM_DIM_ALPHA)
+            else -> drawPlaceholder(canvas, tint)
+        }
+    }
+
+    /**
+     * The "--" placeholder for a phone without signal.
+     *
+     * Set as a text glyph it was a hairline: a dash pair carries almost no ink, so it
+     * vanished in the status bar. Drawn as two bars it finally has the presence of a
+     * real network type, and it keeps the meaning of the placeholder it replaces.
+     */
+    private fun drawPlaceholder(canvas: Canvas, tint: Int) {
+        fill(tint)
+        val y = NETWORK_LABEL_CENTER
+        val half = PLACEHOLDER_BAR_HEIGHT / 2f
+        val left = 50f - PLACEHOLDER_BAR_GAP / 2f
+        val right = 50f + PLACEHOLDER_BAR_GAP / 2f
+        canvas.drawRoundRect(left - PLACEHOLDER_BAR_WIDTH, y - half, left, y + half,
+            half, half, paint)
+        canvas.drawRoundRect(right, y - half, right + PLACEHOLDER_BAR_WIDTH, y + half,
+            half, half, paint)
     }
 
     // ------------------------------------------------------------------ signal dots
@@ -486,11 +575,16 @@ class IndicatorRenderer {
         fill(tint, if (state.wifiLevel >= 1 && state.wifi != WifiPhase.CONNECTING) 255 else 55)
         canvas.drawCircle(50f, WIFI_CENTER_Y, 3.4f, paint)
         canvas.restoreToCount(wSave)
-        // The markers belong to the fan, so they follow it down.
-        if (state.wifi in setOf(WifiPhase.NO_INTERNET, WifiPhase.CAPTIVE)) {
-            text(canvas, if (state.wifi == WifiPhase.CAPTIVE) "?" else "!", 73f, WIFI_CENTER_Y - 17f, 14f, tint)
-        } else if (state.wifi == WifiPhase.CONNECTING) {
-            text(canvas, "...", 50f, WIFI_CENTER_Y - 11f, 12f, tint)
+        // The markers belong to the fan, but they must not touch it: they hang in the
+        // top right corner of the fan's box, where the percentage leaves room.
+        val marker = when (state.wifi) {
+            WifiPhase.NO_INTERNET -> "!"
+            WifiPhase.CAPTIVE -> "?"
+            WifiPhase.CONNECTING -> "..."
+            else -> null
+        }
+        if (marker != null) {
+            text(canvas, marker, WIFI_MARKER_X, WIFI_MARKER_BASELINE, WIFI_MARKER_SIZE, tint)
         }
     }
 
