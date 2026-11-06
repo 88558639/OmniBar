@@ -144,26 +144,26 @@ class ColorOsAdapter(
 
         // Keep suppressed icons hidden even when SystemUI re-shows them.
         hookBefore(View::class.java, "setVisibility", Int::class.javaPrimitiveType!!) { c ->
-            if (changingVisibility) return@hookBefore
+            if (changingVisibility) return@hookBefore null
             val view = c.getThisObject() as View
             for (session in sessions.values) {
                 if (session.hidden.containsKey(view)) {
-                    c.getArgs()[0] = View.GONE
-                    return@hookBefore
+                    return@hookBefore arrayOf(View.GONE)
                 }
             }
+            null
         }
 
         // Suppress layout animations while the indicator is mounted.
         hookBefore(ViewGroup::class.java, "setLayoutTransition", LayoutTransition::class.java) { c ->
-            if (Looper.myLooper() != Looper.getMainLooper() || changingVisibility) return@hookBefore
+            if (Looper.myLooper() != Looper.getMainLooper() || changingVisibility) return@hookBefore null
             for (session in sessions.values) {
                 if (session.host === c.getThisObject() && session.transitionOwned) {
-                    session.savedTransition = c.getArgs()[0] as LayoutTransition?
-                    c.getArgs()[0] = null
-                    return@hookBefore
+                    session.savedTransition = c.getArg(0) as LayoutTransition?
+                    return@hookBefore arrayOf(null)
                 }
             }
+            null
         }
 
         // Lockscreen battery view (the main bar is covered by onAttachedToWindow above).
@@ -203,20 +203,26 @@ class ColorOsAdapter(
     }
 
     /**
-     * Hooks a single method by exact signature. [block] runs before `proceed()`, so it can
-     * rewrite arguments (`chain.getArgs()` is a mutable list) or skip the original call.
+     * Hooks a single method by exact signature. [block] runs before the original call and
+     * may return a replacement argument array; a null return keeps the original arguments.
+     *
+     * libxposed's `Chain.getArgs()` list is immutable, so arguments are rewritten by passing
+     * a new array to `proceed(newArgs)` rather than mutating the list in place.
      */
     private fun hookBefore(
         clazz: Class<*>,
         name: String,
         vararg params: Class<*>,
-        block: (XposedInterface.Chain) -> Unit
+        block: (XposedInterface.Chain) -> Array<Any?>?
     ) {
         val m = clazz.getDeclaredMethod(name, *params)
         hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
             .intercept { chain ->
-                try { block(chain) } catch (error: Throwable) { fail(error) }
-                chain.proceed()
+                val args = try { block(chain) } catch (error: Throwable) {
+                    fail(error)
+                    null
+                }
+                if (args == null) chain.proceed() else chain.proceed(args)
             }
     }
 
