@@ -520,10 +520,10 @@ class IndicatorRenderer {
     private fun logSignalColumns(state: IndicatorState, config: IndicatorConfig) {
         val (left, right) = columnLevels(state, config)
         val activeSlot = state.sims.firstOrNull { it.dataDefault }?.slot
-        val line = "3IN1: columns dualSim=${config.dualSim} left=$left right=$right active=$activeSlot"
+        val line = "OmniBar: columns dualSim=${config.dualSim} left=$left right=$right active=$activeSlot"
         if (line != lastColumnLog) {
             lastColumnLog = line
-            android.util.Log.i("3IN1", line)
+            android.util.Log.i("OmniBar", line)
         }
     }
 

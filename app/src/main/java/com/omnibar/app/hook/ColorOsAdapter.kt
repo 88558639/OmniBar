@@ -127,7 +127,7 @@ class ColorOsAdapter(
         flowValue = opt { loader.loadClass("kotlinx.coroutines.flow.StateFlow").getMethod("getValue") }
         singleTone = opt { loader.loadClass(BATTERY_ICON_COLOR).getMethod("getSingleToneColor") }
 
-        log(Log.INFO, "3IN1",
+        log(Log.INFO, "OmniBar",
 " contract resolved " +
                 "(binding=${batteryBinding != null} slots=${addIgnoredSlot != null} " +
                 "color=${batteryColors != null} tone=${singleTone != null} charge=${nativeCharging != null})"
@@ -172,7 +172,7 @@ class ColorOsAdapter(
                 val root = c.getThisObject() as? ViewGroup ?: return@hookAllAfter
                 root.post { guarded { scanForBattery(root, lockscreen = true) } }
             }
-        }.onFailure { log(Log.INFO, "3IN1", "lockscreen fallback unavailable: $it") }
+        }.onFailure { log(Log.INFO, "OmniBar", "lockscreen fallback unavailable: $it") }
 
         // Exact Wi-Fi traffic direction (SuperIcon's hook); optional.
         runCatching {
@@ -181,9 +181,9 @@ class ColorOsAdapter(
                 val direction = c.getArgs().getOrNull(0) as? Int ?: return@hookAfter
                 main.post { source?.setWifiActivity(direction) }
             }
-        }.onFailure { log(Log.INFO, "3IN1", "wifi-activity hook unavailable: $it") }
+        }.onFailure { log(Log.INFO, "OmniBar", "wifi-activity hook unavailable: $it") }
 
-        log(Log.INFO, "3IN1", "hooks installed")
+        log(Log.INFO, "OmniBar", "hooks installed")
     }
 
     /**
@@ -247,7 +247,7 @@ class ColorOsAdapter(
     private inline fun <T> opt(block: () -> T): T? = try {
         block()
     } catch (error: Throwable) {
-        log(Log.INFO, "3IN1", "optional member unavailable: ${error.javaClass.simpleName}: ${error.message}")
+        log(Log.INFO, "OmniBar", "optional member unavailable: ${error.javaClass.simpleName}: ${error.message}")
         null
     }
 
@@ -271,7 +271,7 @@ class ColorOsAdapter(
     private fun attach(host: ViewGroup, lockscreen: Boolean) {
         if (failed || sessions.containsKey(host)) return
         val root = findIconRow(host) ?: run {
-            log(Log.INFO, "3IN1", "no icon row next to the battery view; keeping native icons")
+            log(Log.INFO, "OmniBar", "no icon row next to the battery view; keeping native icons")
             return
         }
         initialize(host.context)
@@ -383,7 +383,7 @@ class ColorOsAdapter(
         session.host.getGlobalVisibleRect(hostRect)
         val rowRect = Rect()
         session.root.getGlobalVisibleRect(rowRect)
-        log(Log.INFO, "3IN1",
+        log(Log.INFO, "OmniBar",
 " anchor=${anchor?.javaClass?.simpleName} anchorRect=${rect.top}..${rect.bottom} " +
                 "host=${session.host.javaClass.simpleName} hostRect=${hostRect.top}..${hostRect.bottom} " +
                 "row=${session.root.javaClass.simpleName} rowRect=${rowRect.top}..${rowRect.bottom}"
@@ -394,7 +394,7 @@ class ColorOsAdapter(
             view.getGlobalVisibleRect(r)
             names.add("${view.javaClass.simpleName}@${r.top}..${r.bottom}")
         }
-        if (names.isNotEmpty()) log(Log.INFO, "3IN1", "native icons ${names.joinToString(", ")}")
+        if (names.isNotEmpty()) log(Log.INFO, "OmniBar", "native icons ${names.joinToString(", ")}")
     }
 
     private fun initialize(c: Context) {
@@ -405,13 +405,13 @@ class ColorOsAdapter(
         mirrorFile = runCatching {
             val dir = runCatching { c.filesDir }.getOrNull()
                 ?: java.io.File(c.applicationInfo.dataDir, "files")
-            java.io.File(dir, "3in1-mirror.conf")
+            java.io.File(dir, "omnibar-mirror.conf")
         }.getOrNull()
-        log(Log.INFO, "3IN1", "mirror file=${mirrorFile?.absolutePath}")
+        log(Log.INFO, "OmniBar", "mirror file=${mirrorFile?.absolutePath}")
         c.registerReceiver(object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent?.action == IndicatorConfig.REFRESH) {
-                    log(Log.INFO, "3IN1", "refresh broadcast received, reloading settings")
+                    log(Log.INFO, "OmniBar", "refresh broadcast received, reloading settings")
                     intent.getStringExtra(IndicatorConfig.PROBE_TOKEN)
                         ?.takeIf { it.isNotBlank() }
                         ?.let { pendingProbeToken = it }
@@ -468,7 +468,7 @@ class ColorOsAdapter(
             val bundle = runCatching {
                 ctx.contentResolver.call(
                     Uri.parse("content://${IndicatorConfig.PACKAGE}.config"), "config", null, null)
-            }.onFailure { log(Log.INFO, "3IN1", "provider call failed: ${it.message}") }.getOrNull()
+            }.onFailure { log(Log.INFO, "OmniBar", "provider call failed: ${it.message}") }.getOrNull()
             val rev = runCatching {
                 ctx.contentResolver.call(
                     Uri.parse("content://${IndicatorConfig.PACKAGE}.config"), "revision", null, null)
@@ -491,12 +491,12 @@ class ColorOsAdapter(
         revision = if (source == "mirror") mirrorRevision else rev
         if (source == "provider" || source == "xsharedprefs") writeMirror(cfg, rev)
         lastConfigSource = source
-        log(Log.INFO, "3IN1",
+        log(Log.INFO, "OmniBar",
 " config[$source] enabled=${cfg.enabled} dualSim=${cfg.dualSim} " +
                 "size=${cfg.size} dotScale=${cfg.dotScale} swap=${cfg.swap} " +
                 "showActivity=${cfg.showActivity} showVpn=${cfg.showVpn}"
         )
-        android.util.Log.i("3IN1", "config[$source] enabled=${cfg.enabled} dualSim=${cfg.dualSim}")
+        android.util.Log.i("OmniBar", "config[$source] enabled=${cfg.enabled} dualSim=${cfg.dualSim}")
         guarded {
             manageSource()
             refresh(layout = true)
@@ -531,7 +531,7 @@ class ColorOsAdapter(
             }
             file.parentFile?.mkdirs()
             file.writeText(text)
-        }.onFailure { log(Log.INFO, "3IN1", "mirror write failed: ${it.message}") }
+        }.onFailure { log(Log.INFO, "OmniBar", "mirror write failed: ${it.message}") }
     }
 
     private fun readMirror(): IndicatorConfig? = runCatching {
@@ -589,7 +589,7 @@ class ColorOsAdapter(
                 state = next
                 if (changed) {
                     lastFingerprint = fingerprint
-                    log(Log.INFO, "3IN1",
+                    log(Log.INFO, "OmniBar",
                         "state battery=${next.battery} observed=${next.batteryObserved} " +
                             "netReady=${next.networkReady} sim=${next.sim} wifi=${next.wifi} " +
                             "airplane=${next.airplane} level=${next.mobileLevel} " +
@@ -785,7 +785,7 @@ class ColorOsAdapter(
             sessions.values.any { it.active } -> "模块已运行"
             else -> "模块已加载；当前显示位置未启用"
         }
-        log(Log.INFO, "3IN1", "$text; revision=$revision; hosts=${sessions.size}")
+        log(Log.INFO, "OmniBar", "$text; revision=$revision; hosts=${sessions.size}")
         main.post {
             runCatching {
                 ctx.contentResolver.call(
@@ -798,7 +798,7 @@ class ColorOsAdapter(
             }.onFailure {
                 // A swallowed failure here leaves the settings screen showing a stale
                 // receipt, so the reason has to reach the log.
-                log(Log.INFO, "3IN1", "report failed: $it")
+                log(Log.INFO, "OmniBar", "report failed: $it")
             }
         }
     }
@@ -829,7 +829,7 @@ class ColorOsAdapter(
         } finally {
             changingVisibility = false
         }
-        log(Log.INFO, "3IN1", "restored stock icons: $error")
+        log(Log.INFO, "OmniBar", "restored stock icons: $error")
         report()
     }
 

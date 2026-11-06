@@ -9,5 +9,5 @@ dependencyResolutionManagement {
         maven("https://api.xposed.info/")
     }
 }
-rootProject.name = "3IN1"
+rootProject.name = "OmniBar"
 include(":app")

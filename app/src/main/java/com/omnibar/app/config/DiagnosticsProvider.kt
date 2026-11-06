@@ -28,7 +28,7 @@ class DiagnosticsProvider : ContentProvider() {
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
         if (!allowed()) {
-            throw SecurityException("3IN1 diagnostics are only writable by the system")
+            throw SecurityException("OmniBar diagnostics are only writable by the system")
         }
         val ctx = context ?: return null
         val prefs = ctx.getSharedPreferences("diagnostics", Context.MODE_PRIVATE)

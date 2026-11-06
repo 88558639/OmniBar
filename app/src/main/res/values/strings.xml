@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">OmniBar</string>
+    <string name="module_description">状态栏多合一 · 在 SystemUI 电量宿主内绘制电量 / Wi-Fi / 蜂窝组合指示器</string>
+</resources>

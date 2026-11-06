@@ -16,8 +16,8 @@ import io.github.libxposed.api.XposedModuleInterface
 class ModuleEntry : XposedModule() {
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
         if (param.packageName != "com.android.systemui" || !param.isFirstPackage) return
-        log(Log.INFO, "3IN1", "SystemUI entry")
+        log(Log.INFO, "OmniBar", "SystemUI entry")
         runCatching { ColorOsAdapter(param.defaultClassLoader, ::hook, ::log).install() }
-            .onFailure { log(Log.ERROR, "3IN1", "adapter unavailable: $it") }
+            .onFailure { log(Log.ERROR, "OmniBar", "adapter unavailable: $it") }
     }
 }

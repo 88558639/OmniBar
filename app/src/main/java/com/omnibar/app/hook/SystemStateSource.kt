@@ -354,7 +354,7 @@ class SystemStateSource(
             val tech = CHARGE_TECHNOLOGY_PATHS.firstNotNullOfOrNull { readSysfsLine(it) } ?: "n/a"
             val type = CHARGE_TYPE_PATHS.firstNotNullOfOrNull { readSysfsLine(it) } ?: "n/a"
             val usbType = readUsbTypeActive() ?: "n/a"
-            log(Log.INFO, "3IN1",
+            log(Log.INFO, "OmniBar",
                 "charge protocol=$protocol (sysfs=$sysfs node=[tech=$tech type=$type usb=$usbType]) " +
                     "negotiated=${negotiatedVoltageMv}mV/${negotiatedCurrentMa}mA " +
                     "oplus=[fastType=$oplusFastType ppsMode=$oplusPpsMode tech=$oplusChargeTechnology " +
@@ -538,7 +538,7 @@ class SystemStateSource(
                 addAction(OPLUS_BATTERY_CHANGED)
                 addAction(OPLUS_UI_BATTERY_CHANGED)
             }, Context.RECEIVER_EXPORTED)
-        }.onFailure { log(Log.INFO, "3IN1", "oplus charge broadcast unavailable: $it") }
+        }.onFailure { log(Log.INFO, "OmniBar", "oplus charge broadcast unavailable: $it") }
 
         connectivity.registerNetworkCallback(
             NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(),
@@ -549,14 +549,14 @@ class SystemStateSource(
             ?.let {
                 current = BatterySnapshot.apply(current, it)
                 refreshChargerTelemetry()
-                log(Log.INFO, "3IN1", "sticky battery level=${current.battery} observed=${current.batteryObserved}")
+                log(Log.INFO, "OmniBar", "sticky battery level=${current.battery} observed=${current.batteryObserved}")
             }
-            ?: log(Log.INFO, "3IN1", "no sticky battery broadcast received")
+            ?: log(Log.INFO, "OmniBar", "no sticky battery broadcast received")
         current = current.copy(powerSave = power.isPowerSaveMode, airplane = isAirplane())
 
         registerSignalListeners()
         runCatching { subs.addOnSubscriptionsChangedListener(executor, subListener) }
-            .onFailure { log(Log.INFO, "3IN1", "subscription listener unavailable: $it") }
+            .onFailure { log(Log.INFO, "OmniBar", "subscription listener unavailable: $it") }
         schedule()
         handler.postDelayed(activityPoll, 1500)
     }
@@ -684,7 +684,7 @@ class SystemStateSource(
         }
         simCallbacks[id] = tm to callback
         runCatching { tm.registerTelephonyCallback(executor, callback) }
-            .onFailure { log(Log.INFO, "3IN1", "signal listener for sub $id unavailable: $it") }
+            .onFailure { log(Log.INFO, "OmniBar", "signal listener for sub $id unavailable: $it") }
     }
 
     private fun updateSim(id: Int, transform: (IndicatorSim) -> IndicatorSim) {
@@ -762,7 +762,7 @@ class SystemStateSource(
         val sig = sims.joinToString(prefix = "[", postfix = "]") { "${it.slot}:${it.level}:${it.phase}" }
         if (sig != lastSimsSig) {
             lastSimsSig = sig
-            log(Log.INFO, "3IN1", "sims=$sig defaultSub=$defaultSub")
+            log(Log.INFO, "OmniBar", "sims=$sig defaultSub=$defaultSub")
         }
     }
 

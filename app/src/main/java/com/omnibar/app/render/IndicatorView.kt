@@ -74,7 +74,7 @@ class IndicatorView(context: Context) : View(context) {
         translationY = target - layoutTop
         aligned = true
         android.util.Log.d(
-            "3IN1",
+            "OmniBar",
             "aligned shift=${translationY} top=$layoutTop target=$target " +
                 "anchorTop=$anchorTop anchorH=$anchorHeight w=$width h=$height"
         )

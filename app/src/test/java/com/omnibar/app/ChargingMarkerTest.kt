@@ -47,8 +47,8 @@ class ChargingMarkerTest {
             assertFalse(labels.any { it.contains("低电量自动显示数字") })
             // The master switch is gone: the replacement follows the LSPosed module,
             // so the page no longer offers an "enable" switch at all.
-            assertFalse(labels.any { it.contains("启用三合一") })
-            assertEquals(0, views.count { it.contentDescription == "启用三合一" })
+            assertFalse(labels.any { it.contains("启用多合一") })
+            assertEquals(0, views.count { it.contentDescription == "启用多合一" })
             // Every switch on the page is gone for good — the two colour toggles went
             // with them. Only the platform widget was ever a risk, and it stays away.
             assertEquals(0, views.count { it is CardSwitch })

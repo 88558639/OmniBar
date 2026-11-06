@@ -446,7 +446,7 @@ class RenderingTest {
             assertEquals(0, views.count { it is SeekBar })
             assertEquals(0, views.count { it is CardSwitch })
             assertEquals(0, views.count { it is Switch })
-            assertFalse(views.filterIsInstance<TextView>().any { it.text.toString().contains("启用三合一") })
+            assertFalse(views.filterIsInstance<TextView>().any { it.text.toString().contains("启用多合一") })
             // The diagnostics panel is gone as well.
             assertFalse(views.filterIsInstance<TextView>().any { it.text.toString().contains("适配诊断") })
             // The preview state is picked with chips instead of a spinner.

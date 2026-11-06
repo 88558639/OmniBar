@@ -44,7 +44,7 @@ class ConfigProvider : ContentProvider() {
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
         if (!allowed()) {
-            throw SecurityException("3IN1 config is only readable by the system")
+            throw SecurityException("OmniBar config is only readable by the system")
         }
         val ctx = context ?: return null
         val prefs = ctx.getSharedPreferences(IndicatorConfig.FILE, Context.MODE_PRIVATE)

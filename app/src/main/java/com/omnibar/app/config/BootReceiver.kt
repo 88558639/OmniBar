@@ -15,7 +15,7 @@ import android.content.Intent
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
-        android.util.Log.i("3IN1", "boot receiver fired; publishing provider")
+        android.util.Log.i("OmniBar", "boot receiver fired; publishing provider")
         runCatching {
             context.getSharedPreferences(IndicatorConfig.FILE, Context.MODE_PRIVATE).all
         }
