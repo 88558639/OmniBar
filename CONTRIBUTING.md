@@ -1,6 +1,6 @@
 # 贡献指南
 
-感谢关注 3IN1。当前项目仍处于面向精确 ColorOS/SystemUI 版本的兼容性测试阶段。
+感谢关注 OmniBar。当前项目仍处于面向精确 ColorOS/SystemUI 版本的兼容性测试阶段。
 
 ## 提交前
 

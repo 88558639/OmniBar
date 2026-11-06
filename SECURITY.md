@@ -2,9 +2,9 @@
 
 ## 适用范围
 
-3IN1 是进入 `com.android.systemui` 的 Root/LSPosed 模块。错误的适配、作用域或框架状态可能导致 SystemUI 异常、状态栏回退或设备需要进入安全恢复流程。
+OmniBar 是进入 `com.android.systemui` 的 Root/LSPosed 模块。错误的适配、作用域或框架状态可能导致 SystemUI 异常、状态栏回退或设备需要进入安全恢复流程。
 
-请只在已知适配 gate 上测试，并将 LSPosed 作用域限制为 `com.android.systemui`。遇到异常时，优先在 LSPosed 停用 3IN1，再重启 SystemUI 或设备。
+请只在已知适配 gate 上测试，并将 LSPosed 作用域限制为 `com.android.systemui`。遇到异常时，优先在 LSPosed 停用 OmniBar，再重启 SystemUI 或设备。
 
 ## 报告安全问题
 

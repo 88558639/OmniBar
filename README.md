@@ -1,14 +1,14 @@
-# 3IN1
+# OmniBar
 
-<p align="center"><img src="app/src/main/res/drawable-nodpi/app_logo.png" width="96" alt="3IN1 Logo"></p>
+<p align="center"><img src="app/src/main/res/drawable-nodpi/app_logo.png" width="96" alt="OmniBar Logo"></p>
 
 > **0.1.8 compat 预发布。** 基于 ColorOS 16 机型开发与验证，不是全机型支持声明；其他 Android/ColorOS 版本不作兼容保证。
 
 当前源码与 **0.1.8 compat 预发布版**一致；本轮真机验收待完成。新增行为与本地验证见 [0.1.8 更新说明](docs/releases/v0.1.8.md)。
 
-[下载 APK 与校验文件](https://github.com/FangFangTu150/3IN1/releases/tag/v0.1.8) · [提交问题](https://github.com/FangFangTu150/3IN1/issues) · [安装与恢复](docs/INSTALL.md)
+[下载 APK 与校验文件](https://github.com/FangFangTu150/OmniBar/releases/tag/v0.1.8) · [提交问题](https://github.com/FangFangTu150/OmniBar/issues) · [安装与恢复](docs/INSTALL.md)
 
-3IN1 是需要 Root/LSPosed（或兼容 legacy Xposed 框架）的 Android 模块，在 SystemUI 原有电池宿主内绘制电量、Wi-Fi 与蜂窝信号组合指示器。
+OmniBar 是需要 Root/LSPosed（或兼容 legacy Xposed 框架）的 Android 模块，在 SystemUI 原有电池宿主内绘制电量、Wi-Fi 与蜂窝信号组合指示器。
 
 ## 范围与边界
 
@@ -70,9 +70,9 @@
 
 1. 安装或覆盖 `0.1.6 compat`，不要清除数据。
 2. LSPosed 只勾选 `com.android.systemui`，不要选 Android Framework 或所有应用。
-3. 启用作用域后重新打开 3IN1，让激活前设置迁移到共享目录；应用默认关闭替换。
+3. 启用作用域后重新打开 OmniBar，让激活前设置迁移到共享目录；应用默认关闭替换。
 4. 重启 SystemUI 或设备，刷新诊断后再启用替换。应用不会自动重启。
-5. 异常时先在应用中关闭/恢复原图标；若应用打不开，在 LSPosed 停用 3IN1 后重启。反复崩溃时使用现有 Root/LSPosed 安全恢复流程。
+5. 异常时先在应用中关闭/恢复原图标；若应用打不开，在 LSPosed 停用 OmniBar 后重启。反复崩溃时使用现有 Root/LSPosed 安全恢复流程。
 
 `compat` 是非 debug APK，但使用现有 debug/test 签名以保持测试安装更新兼容；签名密钥不发布，跨签名覆盖安装会失败。
 

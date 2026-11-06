@@ -42,8 +42,8 @@
 
 ## 源码入口
 
-- `app/src/main/java/io/github/threeinone/config/IndicatorConfig.kt`：默认值和边界。
-- `app/src/main/java/io/github/threeinone/hook/ModuleEntry.kt`：gate、作用域宿主和回退。
-- `app/src/main/java/io/github/threeinone/model/BatterySnapshot.kt`：电量解析。
-- `app/src/main/java/io/github/threeinone/model/WifiStatus.kt`：Wi-Fi 判定。
+- `app/src/main/java/com/omnibar/app/config/IndicatorConfig.kt`：默认值和边界。
+- `app/src/main/java/com/omnibar/app/hook/ModuleEntry.kt`：gate、作用域宿主和回退。
+- `app/src/main/java/com/omnibar/app/model/BatterySnapshot.kt`：电量解析。
+- `app/src/main/java/com/omnibar/app/model/WifiStatus.kt`：Wi-Fi 判定。
 - `app/src/main/AndroidManifest.xml`：Xposed 声明和刷新权限。
