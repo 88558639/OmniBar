@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <permission android:name="io.github.threeinone.permission.REFRESH" android:protectionLevel="signature" />
-    <uses-permission android:name="io.github.threeinone.permission.REFRESH" />
+    <permission android:name="com.omnibar.app.permission.REFRESH" android:protectionLevel="signature" />
+    <uses-permission android:name="com.omnibar.app.permission.REFRESH" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
@@ -15,7 +15,7 @@
         android:theme="@style/AppTheme"
         android:supportsRtl="true">
         <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription" android:value="电量、Wi-Fi 与蜂窝信号三合一" />
+        <meta-data android:name="xposeddescription" android:value="状态栏多合一" />
         <meta-data android:name="xposedminversion" android:value="93" />
         <meta-data android:name="xposedsharedprefs" android:value="true" />
         <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
@@ -40,13 +40,13 @@
         <!-- 供 SystemUI 进程读取外观配置；访问者在代码内按 UID 校验（仅 system/root/shell）。 -->
         <provider
             android:name=".config.ConfigProvider"
-            android:authorities="io.github.threeinone.config"
+            android:authorities="com.omnibar.app.config"
             android:exported="true" />
 
         <!-- 供 SystemUI 回执运行状态；同样按 UID 校验。 -->
         <provider
             android:name=".config.DiagnosticsProvider"
-            android:authorities="io.github.threeinone.diagnostics"
+            android:authorities="com.omnibar.app.diagnostics"
             android:exported="true" />
     </application>
 </manifest>

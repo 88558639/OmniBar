@@ -4,14 +4,14 @@ plugins {
 }
 
 android {
-    namespace = "io.github.threeinone"
+    namespace = "com.omnibar.app"
     compileSdk = 36
     defaultConfig {
-        applicationId = "io.github.threeinone"
+        applicationId = "com.omnibar.app"
         minSdk = 34
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.1.9"
+        versionCode = 11
+        versionName = "0.1.10"
     }
     buildTypes {
         create("compat") {
