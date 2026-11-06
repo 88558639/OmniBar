@@ -10,8 +10,8 @@ android {
         applicationId = "com.omnibar.app"
         minSdk = 34
         targetSdk = 36
-        versionCode = 11
-        versionName = "0.1.10"
+        versionCode = 20261106
+        versionName = "2026.11.06"
     }
     buildTypes {
         create("compat") {
