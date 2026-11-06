@@ -36,10 +36,11 @@ class SettingsCopyTest {
             assertTrue("No explanation found", explanations.size >= 2)
             for (explanation in explanations) {
                 val lines = explanation.split("\n").filter { it.isNotBlank() }
-                // A line that ends with a colon is the heading of the list.
+                // A line ending with a colon is the heading of a sub-list; each
+                // sub-list numbers its own items from 1 again.
                 var expected = 1
                 for (line in lines) {
-                    if (line.endsWith("：")) continue
+                    if (line.endsWith("：")) { expected = 1; continue }
                     assertTrue("Unnumbered line: \"$line\"", line.startsWith("$expected."))
                     expected++
                 }
