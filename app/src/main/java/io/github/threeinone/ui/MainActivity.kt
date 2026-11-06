@@ -260,18 +260,18 @@ class MainActivity : Activity() {
         section("充电配色").apply {
             textRow("按充电协议自动配色", null)
             colorRow("原装充电器 · 紫", "voocColor", 0xFF9C6BFF.toInt())
-            colorRow("第三方 UFCS · 绿", "ufcsColor", 0xFF2ECC71.toInt())
-            colorRow("PPS 充电器 · 蓝", "ppsColor", 0xFF3B82F6.toInt())
+            colorRow("第三方 UFCS / PPS · 绿", "ufcsColor", 0xFF2ECC71.toInt())
+            colorRow("PD / DCP · 蓝", "ppsColor", 0xFF3B82F6.toInt())
             colorRow("普通 / 慢充 · 橙", "unknownColor", 0xFFF97316.toInt())
-            hint("自动模式按充电协议上色：\n" +
-                "1. 原装一加充电器紫\n" +
-                "2. 第三方 UFCS 绿\n" +
-                "3. PPS 蓝\n" +
-                "4. 普通与慢充橙\n" +
-                "原装充电器识别：\n" +
-                "5. 依据充电合同的最大功率 120W 判断\n" +
-                "6. 原装头能协商到该上限\n" +
-                "7. 第三方充电器通常只有 30W 上下")
+            hint("自动模式严格按「快充模式」上色：\n" +
+                "1. 快充模式为 SVOOC，或原装百瓦 UFCS 档位，紫\n" +
+                "2. 快充模式为第三方 UFCS、PPS，绿\n" +
+                "3. 快充模式为 PD、DCP，蓝\n" +
+                "4. 快充模式为普通、慢充，橙\n" +
+                "说明：\n" +
+                "5. 颜色以电池检测 app 的「快充模式」为准\n" +
+                "6. 原装百瓦 UFCS 依据合同功率上限 100W 判断\n" +
+                "7. 第三方充电器绝不因功率高而显示紫色")
         }
     }
 

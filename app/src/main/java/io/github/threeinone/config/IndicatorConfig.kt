@@ -61,16 +61,25 @@ data class IndicatorConfig(
     /**
      * Colour used while charging.
      *
-     * In automatic mode the detected protocol decides: the original OnePlus charger
-     * gets the violet tone, a third-party charger speaking the public UFCS standard the
-     * green one and a PPS charger the blue one. Anything else — a plain slow charger or a
-     * protocol that could not be read — is orange.
+     * In automatic mode the protocol name — the text the 电池检测 app shows as
+     * "快充模式" — decides, and nothing else:
+     *
+     *   - the proprietary SuperVOOC/VOOC rail (only the original charger negotiates
+     *     it) → violet
+     *   - UFCS and PPS, the public standards third-party chargers speak → green
+     *   - PD and plain DCP → blue
+     *   - plain / slow charging, or a protocol that could not be read → orange
+     *
+     * There is deliberately no wattage or voltage in this mapping: promoting a UFCS
+     * link to violet by its power is what miscoloured the 酷态科 10 号 Ultra and the
+     * 公牛 PD20W, so a third-party charger whose "快充模式" reads UFCS stays green.
      */
     fun chargeColor(state: IndicatorState): Int = when {
         !chargeColorAuto -> chargingColor
         state.chargeProtocol == ChargeProtocol.SUPER_VOOC -> voocColor
         state.chargeProtocol == ChargeProtocol.UFCS -> ufcsColor
         state.chargeProtocol == ChargeProtocol.PPS -> ppsColor
+        state.chargeProtocol == ChargeProtocol.PD -> ppsColor   // PD/DCP → blue
         else -> unknownColor
     }
 

@@ -62,6 +62,9 @@ class BatteryColorTest {
         // A PPS charger.
         assertEquals(cfg.ppsColor, cfg.batteryColor(
             charging.copy(chargeProtocol = ChargeProtocol.PPS), Color.WHITE))
+        // A plain PD / DCP charger — blue, the same tone as PPS.
+        assertEquals(cfg.ppsColor, cfg.batteryColor(
+            charging.copy(chargeProtocol = ChargeProtocol.PD), Color.WHITE))
         // A plain charger, and a fast charger of an unknown rail.
         // A plain slow charger and a fast charger of an unknown rail are both orange.
         assertEquals(cfg.unknownColor, cfg.batteryColor(

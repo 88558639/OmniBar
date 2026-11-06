@@ -5,14 +5,23 @@ enum class WifiPhase { OFF, DISCONNECTED, CONNECTING, CONNECTED, NO_INTERNET, CA
 enum class SimPhase { READY, NO_SIGNAL, EMERGENCY, ABSENT, DISABLED, LOCKED, UNKNOWN }
 
 /**
- * Detected charging protocol.
+ * Detected charging protocol, classified by what the 电池检测 app shows in its
+ * "快充模式" field — never by guessing the charger's hardware or power.
  *
- * [SUPER_VOOC] is the proprietary OnePlus/OPPO rail, which only the original charger
- * negotiates. [UFCS] is the public USB fast-charge standard — the original charger
- * speaks it as well, but a third-party charger is what it usually means. [NONE] means
- * the firmware did not report enough information.
+ * [SUPER_VOOC] is the proprietary OnePlus/OPPO rail (SuperVOOC/VOOC). Only the
+ * original charger can negotiate it, so it is the single reliable marker of an
+ * original charger. [UFCS] and [PPS] are the public USB fast-charge standards that
+ * third-party chargers speak. [PD] is the plain USB Power Delivery link (without the
+ * PPS step). [SLOW] and [FAST] are the non-negotiated fallbacks. [NONE] means the
+ * firmware did not report a "快充模式" at all.
+ *
+ * The colour follows the same text the app shows: SuperVOOC → violet, UFCS/PPS →
+ * green, PD/DCP → blue, plain/slow → orange. A third-party charger whose "快充模式"
+ * reads UFCS must stay green — the app cannot tell it apart from the original's UFCS
+ * handshake, and guessing from wattage or voltage is what caused the 酷态科 / 公牛
+ * miscolour bugs, so no protocol is ever promoted to violet by power alone.
  */
-enum class ChargeProtocol { NONE, SLOW, FAST, PPS, UFCS, SUPER_VOOC }
+enum class ChargeProtocol { NONE, SLOW, FAST, PD, PPS, UFCS, SUPER_VOOC }
 
 /**
  * Data-traffic activity, matching Android's [android.telephony.TelephonyManager] data-activity

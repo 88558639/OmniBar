@@ -3,16 +3,20 @@ package io.github.threeinone
 import io.github.threeinone.hook.SystemStateSource
 import io.github.threeinone.model.ChargeProtocol
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
- * Protocol detection rules.
+ * Protocol classification rules.
  *
- * The firmware reports the negotiated charge technology as `usb_fast_chg_type`; the
- * Oplus broadcast extras are a fallback. The order matters: `pps_chg_mode` is also set
- * while UFCS is running, so consulting it first made every UFCS charger look like a
- * plain PPS charger and show up in the green colour instead of the violet one.
+ * The colour follows the text the 电池检测 app shows as "快充模式" — never a guess
+ * from instantaneous power or hardware. The violet rail is the proprietary SuperVOOC
+ * (only the original charger negotiates it); UFCS and PPS are the public standards
+ * third-party chargers speak; PD/DCP is blue; plain/slow is orange.
+ *
+ * The single wattage that is read is the *contract ceiling* (`ppschg_power`), and only
+ * to split the two UFCS tiers: the original 120 W unit signs a 120 W contract (the
+ * "快充模式" text reads `UFCS(120.00W)`), a third-party UFCS charger signs far less.
+ * This is what fixes the 酷态科 10 号 Ultra and 公牛 PD20W miscolour bugs.
  */
 class ChargeProtocolTest {
     /** All telemetry zero — nothing known yet. */
@@ -33,124 +37,82 @@ class ChargeProtocolTest {
         voltageMv, currentMa, wattage, chargerVoltageMv, charging
     )
 
-    /** A charger that negotiates the UFCS high rail. */
-    private val ufcsHigh = 12000
+    // ------------------------------------------------------------------ named protocols
 
-    @Test fun originalChargerIsRecognisedByItsTechnologyLevel() {
-        // The charging IC reports the capabilities of the charger: the original
-        // OnePlus charger reaches the VOOC level, a plain USB charger stays at 0.
-        assertEquals(
-            ChargeProtocol.SUPER_VOOC,
-            detect(chargeTech = 14, chargeTechnology = 3, plugged = 1)
-        )
-        // The original charger speaks UFCS too — the level is what tells them apart.
-        assertEquals(
-            ChargeProtocol.SUPER_VOOC,
-            detect(chargeTech = 14, chargeTechnology = 3, plugged = 1, wattage = 120)
-        )
-    }
-
-    @Test fun thirdPartyUfcsChargerIsNotTheProprietaryRail() {
-        // A third-party charger that speaks UFCS reports a lower technology level, so
-        // it must not claim the violet SuperVOOC colour.
-        assertEquals(
-            ChargeProtocol.UFCS,
-            detect(chargeTech = 14, chargeTechnology = 0, plugged = 1, wattage = 30,
-                voltageMv = 12000, chargerVoltageMv = 12000)
-        )
-    }
-
-    @Test fun aPpsChargerIsRecognisedByItsNegotiatedVoltage() {
-        // PPS negotiates in 9 V steps and stays below the UFCS rail. The firmware
-        // reports the same charge type for both, so the voltage separates them.
-        assertEquals(
-            ChargeProtocol.PPS,
-            detect(chargeTech = 14, chargeTechnology = 0, plugged = 1, wattage = 18,
-                voltageMv = 9000, chargerVoltageMv = 9000)
-        )
-    }
-
-    @Test fun aPlainUsbPortIsNotAFastCharger() {
-        // The firmware reports the UFCS charge type even for a plain USB port — a power
-        // strip's port for instance. Only the voltage the charger actually delivers
-        // tells them apart: a fast charger pushes the rail to 9 V, a plain port stays
-        // at 5 V. A plain port is slow charging, not an unknown protocol.
-        assertEquals(
-            ChargeProtocol.SLOW,
-            detect(chargeTech = 14, chargeTechnology = 0, plugged = 1, wattage = 0,
-                voltageMv = 5000, chargerVoltageMv = 4648)
-        )
-    }
-
-    @Test fun ufcsIsNotMistakenForPpsEvenWhenPpsFlagIsSet() {
-        // The regression: `pps_chg_mode` is non-zero while UFCS runs, so the charge
-        // technology has to be checked before it.
-        assertEquals(
-            ChargeProtocol.UFCS,
-            detect(chargeTech = 14, ppsMode = 4, fastCharger = true, plugged = 1,
-                voltageMv = 12000, chargerVoltageMv = 12000)
-        )
-    }
-
+    /** The proprietary rail is named by its charge-type code, nothing else. */
     @Test fun superVoocChargeTypeIsRecognised() {
         assertEquals(ChargeProtocol.SUPER_VOOC, detect(chargeTech = 3))
     }
 
-    @Test fun ppsChargeTechnologyIsRecognised() {
+    /** UFCS is named by its charge-type code. */
+    @Test fun ufcsChargeTypeIsRecognised() {
+        assertEquals(ChargeProtocol.UFCS, detect(chargeTech = 6))
+    }
+
+    /** PPS is named by its charge-type code. */
+    @Test fun ppsChargeTypeIsRecognised() {
         assertEquals(ChargeProtocol.PPS, detect(chargeTech = 4))
     }
 
-    @Test fun unknownChargeTechnologyFallsBackToTheOplusExtras() {
-        // The broadcast extra `fast_chg_type` still identifies the proprietary rail.
-        assertEquals(ChargeProtocol.SUPER_VOOC, detect(fastType = 4))
-        // A fast charger without a named rail.
-        assertEquals(ChargeProtocol.FAST, detect(fastCharger = true))
-        // The technology level of the original charger.
-        assertEquals(ChargeProtocol.SUPER_VOOC, detect(chargeTechnology = 3))
-        // Plain USB charger.
+    /** The broadcast `fast_chg_type` carries the same codes on some builds. */
+    @Test fun theBroadcastFastTypeCarriesTheSameCodes() {
+        assertEquals(ChargeProtocol.SUPER_VOOC, detect(fastType = 3))
+        assertEquals(ChargeProtocol.UFCS, detect(fastType = 6))
+        assertEquals(ChargeProtocol.PPS, detect(fastType = 4))
+    }
+
+    // ------------------------------------------------------------------ the two bugs
+
+    /**
+     * The 公牛 PD20W bug: a PD charger must stay blue, never flip to violet or UFCS.
+     * A PD charger reports no proprietary charge type, so it lands on the plain
+     * USB-charger fallback.
+     */
+    @Test fun aPdChargerStaysPlain() {
         assertEquals(ChargeProtocol.SLOW, detect(plugged = 1))
     }
 
-    @Test fun negotiatedVoltageStillAllowsARoughGuess() {
-        // 11 V is the proprietary SuperVOOC rail, PPS tops out around 9 V.
-        assertEquals(ChargeProtocol.SUPER_VOOC, detect(voltageMv = 11000))
-        assertEquals(ChargeProtocol.PPS, detect(voltageMv = 9000, currentMa = 5000, chargeTech = 4,
-            chargerVoltageMv = 9000))
-        assertEquals(ChargeProtocol.FAST, detect(voltageMv = 9000))
-        assertEquals(ChargeProtocol.SLOW, detect(voltageMv = 5000))
+    /**
+     * The 酷态科 10 号 Ultra bug: a high-power third-party UFCS charger must never
+     * claim the violet rail. The contract ceiling alone must not promote it — a
+     * third-party UFCS charger is green, whatever its wattage.
+     */
+    @Test fun aThirdPartyUfcsChargerIsNotTheProprietaryRail() {
+        // No proprietary charge type, no proprietary broadcast flag → not violet.
+        assertEquals(ChargeProtocol.UFCS, detect(chargeTech = 6))
+        assertEquals(ChargeProtocol.UFCS, detect(chargeTech = 6, wattage = 120))
     }
 
+    // ------------------------------------------------------------------ fallbacks
+
+    /** A fast charger the firmware flagged but named no rail for. */
+    @Test fun anUnnamedFastChargerIsFast() {
+        assertEquals(ChargeProtocol.FAST, detect(fastCharger = true))
+    }
+
+    /** Plugged in but no fast protocol reported: a plain USB charger. */
+    @Test fun aPlainUsbChargerIsSlow() {
+        assertEquals(ChargeProtocol.SLOW, detect(plugged = 1))
+    }
+
+    /** Nothing known at all. */
     @Test fun nothingKnownMeansNoProtocol() {
         assertEquals(ChargeProtocol.NONE, detect(wattage = 0))
     }
 
+    /** An idle charger negotiates nothing, so the colour stays neutral. */
     @Test fun aChargerThatIsPluggedInButIdleIsNotFastCharging() {
-        // The charge technology keeps its last value while the charger sits idle, so
-        // a plugged-in USB port that is not charging must not look like UFCS.
         assertEquals(
             ChargeProtocol.NONE,
-            detect(chargeTech = 14, plugged = 1, fastCharger = true, charging = false)
+            detect(chargeTech = 6, plugged = 1, fastCharger = true, charging = false)
         )
     }
 
-    @Test fun aFullBatteryStillCountsAsCharging() {
-        // A full battery draws no power, so the live reading drops to zero even on the
-        // original charger — the charging state is what keeps the colour.
-        assertEquals(
-            ChargeProtocol.UFCS,
-            detect(chargeTech = 14, plugged = 1, wattage = 0, voltageMv = 12000,
-                chargerVoltageMv = 12000, charging = true)
-        )
-        assertEquals(
-            ChargeProtocol.SUPER_VOOC,
-            detect(chargeTech = 14, chargeTechnology = 3, plugged = 1, wattage = 0, charging = true)
-        )
-    }
+    // ------------------------------------------------------------------ contract tier
 
     /**
-     * The contract's power ceiling is the value the 电池检测 app shows as "PPS 最大功率".
-     * The node carries it in an unspecified unit, so the raw values are normalised the
-     * same way the app does.
+     * The contract ceiling is the number the 电池检测 app prints inside the "快充模式"
+     * text as `UFCS(120.00W)`. It is normalised the same way the app does.
      */
     @Test fun theContractPowerCeilingIsNormalisedToWatts() {
         assertEquals(120, SystemStateSource.contractWatts("120"))
@@ -164,39 +126,75 @@ class ChargeProtocolTest {
     }
 
     /**
-     * The original OnePlus charger speaks UFCS and PPS as well, and the firmware only
-     * flags the proprietary SuperVOOC rail when the original cable is used. The 120 W
-     * contract ceiling identifies it regardless of the link that was negotiated.
+     * The proprietary flag always wins — it is the "快充模式 == SVOOC" the user sees,
+     * and only the original charger negotiates it, whatever the contract says.
      */
-    @Test fun theOriginalChargerIsRecognisedByIts120WContractCeiling() {
-        // UFCS link, but the original 120 W unit → the proprietary rail (violet).
+    @Test fun theProprietaryFlagAlwaysWins() {
         assertEquals(
             ChargeProtocol.SUPER_VOOC,
-            SystemStateSource.fastProtocolFromFlags(voocIng = 0, ppsIng = 4, contractWatts = 120)
+            SystemStateSource.classifyFastCharging(voocIng = 1, ppsIng = 4, contractWatts = 30)
         )
-        // PPS link, same charger → still the proprietary rail.
         assertEquals(
             ChargeProtocol.SUPER_VOOC,
-            SystemStateSource.fastProtocolFromFlags(voocIng = 0, ppsIng = 2, contractWatts = 120)
+            SystemStateSource.classifyFastCharging(voocIng = 1, ppsIng = 0, contractWatts = 0)
         )
-        // A third-party UFCS charger signs a much lower contract → stays green.
+    }
+
+    /**
+     * The original charger's UFCS handshake reads `UFCS(120.00W)` — its 120 W contract
+     * is the "百瓦档位" marker. It keeps the violet rail even though the link is UFCS.
+     */
+    @Test fun theOriginalUfcsHandshakeKeepsTheVioletRail() {
+        assertEquals(
+            ChargeProtocol.SUPER_VOOC,
+            SystemStateSource.classifyFastCharging(voocIng = 0, ppsIng = 4, contractWatts = 120)
+        )
+        assertEquals(
+            ChargeProtocol.SUPER_VOOC,
+            SystemStateSource.classifyFastCharging(voocIng = 0, ppsIng = 4, contractWatts = 100)
+        )
+    }
+
+    /**
+     * The 酷态科 10 号 Ultra bug: a third-party UFCS charger signs far less than the
+     * original's 120 W contract, so it must stay green — never violet, no matter how
+     * high its own ceiling climbs below the 100 W tier.
+     */
+    @Test fun aThirdPartyUfcsChargerStaysGreen() {
         assertEquals(
             ChargeProtocol.UFCS,
-            SystemStateSource.fastProtocolFromFlags(voocIng = 0, ppsIng = 4, contractWatts = 30)
+            SystemStateSource.classifyFastCharging(voocIng = 0, ppsIng = 4, contractWatts = 30)
         )
-        // A third-party PPS charger → stays blue.
+        assertEquals(
+            ChargeProtocol.UFCS,
+            SystemStateSource.classifyFastCharging(voocIng = 0, ppsIng = 4, contractWatts = 65)
+        )
+        assertEquals(
+            ChargeProtocol.UFCS,
+            SystemStateSource.classifyFastCharging(voocIng = 0, ppsIng = 4, contractWatts = 99)
+        )
+    }
+
+    /**
+     * A third-party PPS charger is green. The 公牛 PD20W bug: a PPS charger must stay
+     * in its own tier and never jump to violet.
+     */
+    @Test fun aThirdPartyPpsChargerStaysGreen() {
         assertEquals(
             ChargeProtocol.PPS,
-            SystemStateSource.fastProtocolFromFlags(voocIng = 0, ppsIng = 2, contractWatts = 30)
+            SystemStateSource.classifyFastCharging(voocIng = 0, ppsIng = 2, contractWatts = 30)
         )
-        // The proprietary flag always wins, whatever the ceiling says.
         assertEquals(
-            ChargeProtocol.SUPER_VOOC,
-            SystemStateSource.fastProtocolFromFlags(voocIng = 1, ppsIng = 4, contractWatts = 30)
+            ChargeProtocol.PPS,
+            SystemStateSource.classifyFastCharging(voocIng = 0, ppsIng = 2, contractWatts = 120)
         )
-        // No fast-charge standard running at all.
-        assertNull(
-            SystemStateSource.fastProtocolFromFlags(voocIng = 0, ppsIng = 0, contractWatts = 120)
+    }
+
+    /** No fast-charge standard running at all. */
+    @Test fun noFastChargeStandardYieldsNothing() {
+        assertEquals(
+            null,
+            SystemStateSource.classifyFastCharging(voocIng = 0, ppsIng = 0, contractWatts = 120)
         )
     }
 }
