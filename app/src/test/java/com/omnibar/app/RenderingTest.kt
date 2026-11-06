@@ -397,18 +397,18 @@ class RenderingTest {
             batteryPhase = BatteryPhase.FULL,
             chargeProtocol = ChargeProtocol.SUPER_VOOC
         )
-        val violet = IndicatorConfig().voocColor
-        // Render a large, transparent, anti-aliased tile. The indicator is drawn into a
-        // centred square inset by 12% on every side, so the finished icon keeps an even
-        // breathing margin instead of hugging the top edge (the percentage sits at the
-        // top of the 100-unit box, which otherwise crowds the launcher's rounded mask).
+        // Render the indicator in pure white on a transparent canvas, so the exact glyph
+        // positions can be recoloured element-by-element afterwards (the tricolour 1/0/0
+        // and the orange bolt are applied in post). The renderer owns the layout — number
+        // + bolt centred as a group — so nothing drifts from the in-app preview.
         val size = 1024
         val inset = size * 0.12f
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.translate(inset, inset)
         val drawSize = size - inset * 2
-        IndicatorRenderer().draw(canvas, drawSize, drawSize, state, IndicatorConfig(), violet)
+        IndicatorRenderer().draw(canvas, drawSize, drawSize, state,
+            IndicatorConfig(colors = false), Color.WHITE)
         save(bitmap, "icon-full-charge-purple.png")
     }
 
