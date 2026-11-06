@@ -73,8 +73,9 @@ class IndicatorView(context: Context) : View(context) {
         }
         translationY = target - layoutTop
         aligned = true
-        de.robv.android.xposed.XposedBridge.log(
-            "3IN1: aligned shift=${translationY} top=$layoutTop target=$target " +
+        android.util.Log.d(
+            "3IN1",
+            "aligned shift=${translationY} top=$layoutTop target=$target " +
                 "anchorTop=$anchorTop anchorH=$anchorHeight w=$width h=$height"
         )
     }

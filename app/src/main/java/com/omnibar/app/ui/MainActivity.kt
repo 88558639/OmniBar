@@ -284,6 +284,8 @@ class MainActivity : Activity() {
                 setTextColor(palette.ink)
                 background = rounded(palette.surface, 18f)
                 isAllCaps = false
+                elevation = 0f
+                stateListAnimator = null
                 setOnClickListener {
                     val version = packageManager.getPackageInfo(packageName, 0).versionName
                     AlertDialog.Builder(this@MainActivity)

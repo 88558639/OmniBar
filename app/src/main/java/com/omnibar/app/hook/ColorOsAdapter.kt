@@ -11,17 +11,16 @@ import android.graphics.Rect
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XSharedPreferences
-import de.robv.android.xposed.XposedBridge
-import de.robv.android.xposed.XposedHelpers
+import io.github.libxposed.api.XposedInterface
 import com.omnibar.app.config.IndicatorConfig
 import com.omnibar.app.model.BatteryPhase
 import com.omnibar.app.model.IndicatorState
 import com.omnibar.app.render.IndicatorView
+import java.lang.reflect.Executable
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.util.IdentityHashMap
@@ -46,7 +45,11 @@ import java.util.concurrent.Executors
  * feature instead of aborting the whole module (the previous implementation validated the
  * whole contract up-front and silently gave up, which is why nothing appeared).
  */
-class ColorOsAdapter(private val loader: ClassLoader) {
+class ColorOsAdapter(
+    private val loader: ClassLoader,
+    private val hook: (Executable) -> XposedInterface.HookBuilder,
+    private val log: (Int, String, String) -> Unit
+) {
     private val main = Handler(Looper.getMainLooper())
     /** Background worker for the cross-process settings bridge. */
     private val io = Executors.newSingleThreadExecutor()
@@ -124,89 +127,121 @@ class ColorOsAdapter(private val loader: ClassLoader) {
         flowValue = opt { loader.loadClass("kotlinx.coroutines.flow.StateFlow").getMethod("getValue") }
         singleTone = opt { loader.loadClass(BATTERY_ICON_COLOR).getMethod("getSingleToneColor") }
 
-        XposedBridge.log(
-            "3IN1: contract resolved " +
+        log(Log.INFO, "3IN1",
+" contract resolved " +
                 "(binding=${batteryBinding != null} slots=${addIgnoredSlot != null} " +
                 "color=${batteryColors != null} tone=${singleTone != null} charge=${nativeCharging != null})"
         )
 
         // Mount point: the battery view itself.
-        XposedBridge.hookAllMethods(battery, "onAttachedToWindow", after { p ->
-            val host = p.thisObject as? ViewGroup ?: return@after
+        hookAllAfter(battery, "onAttachedToWindow") { c ->
+            val host = c.getThisObject() as? ViewGroup ?: return@hookAllAfter
             host.post { guarded { if (host.isAttachedToWindow) attach(host, lockscreen = false) } }
-        })
-        XposedBridge.hookAllMethods(battery, "onDetachedFromWindow", after { p ->
-            guarded { detach(p.thisObject as? ViewGroup ?: return@guarded) }
-        })
+        }
+        hookAllAfter(battery, "onDetachedFromWindow") { c ->
+            guarded { detach(c.getThisObject() as? ViewGroup ?: return@guarded) }
+        }
 
         // Keep suppressed icons hidden even when SystemUI re-shows them.
-        XposedHelpers.findAndHookMethod(View::class.java, "setVisibility", Int::class.javaPrimitiveType,
-            object : XC_MethodHook() {
-                override fun beforeHookedMethod(p: MethodHookParam) {
-                    if (changingVisibility) return
-                    val view = p.thisObject as View
-                    for (session in sessions.values) {
-                        if (session.hidden.containsKey(view)) {
-                            p.args[0] = View.GONE
-                            return
-                        }
-                    }
+        hookBefore(View::class.java, "setVisibility", Int::class.javaPrimitiveType!!) { c ->
+            if (changingVisibility) return@hookBefore
+            val view = c.getThisObject() as View
+            for (session in sessions.values) {
+                if (session.hidden.containsKey(view)) {
+                    c.getArgs()[0] = View.GONE
+                    return@hookBefore
                 }
-            })
+            }
+        }
 
         // Suppress layout animations while the indicator is mounted.
-        XposedHelpers.findAndHookMethod(ViewGroup::class.java, "setLayoutTransition",
-            LayoutTransition::class.java,
-            object : XC_MethodHook() {
-                override fun beforeHookedMethod(p: MethodHookParam) {
-                    if (Looper.myLooper() != Looper.getMainLooper() || changingVisibility) return
-                    for (session in sessions.values) {
-                        if (session.host === p.thisObject && session.transitionOwned) {
-                            session.savedTransition = p.args[0] as LayoutTransition?
-                            p.args[0] = null
-                            return
-                        }
-                    }
+        hookBefore(ViewGroup::class.java, "setLayoutTransition", LayoutTransition::class.java) { c ->
+            if (Looper.myLooper() != Looper.getMainLooper() || changingVisibility) return@hookBefore
+            for (session in sessions.values) {
+                if (session.host === c.getThisObject() && session.transitionOwned) {
+                    session.savedTransition = c.getArgs()[0] as LayoutTransition?
+                    c.getArgs()[0] = null
+                    return@hookBefore
                 }
-            })
+            }
+        }
 
         // Lockscreen battery view (the main bar is covered by onAttachedToWindow above).
         runCatching {
-            XposedBridge.hookAllMethods(loader.loadClass(KEYGUARD_STATUS_BAR), "onFinishInflate",
-                after { p ->
-                    val root = p.thisObject as? ViewGroup ?: return@after
-                    root.post { guarded { scanForBattery(root, lockscreen = true) } }
-                })
-        }.onFailure { XposedBridge.log("3IN1: lockscreen fallback unavailable: $it") }
+            hookAllAfter(loader.loadClass(KEYGUARD_STATUS_BAR), "onFinishInflate") { c ->
+                val root = c.getThisObject() as? ViewGroup ?: return@hookAllAfter
+                root.post { guarded { scanForBattery(root, lockscreen = true) } }
+            }
+        }.onFailure { log(Log.INFO, "3IN1", "lockscreen fallback unavailable: $it") }
 
         // Exact Wi-Fi traffic direction (SuperIcon's hook); optional.
         runCatching {
             val callbackClass = loader.loadClass(WIFI_ACTIVITY_CALLBACK)
-            XposedHelpers.findAndHookMethod(callbackClass, "onStateChanged", Int::class.javaPrimitiveType,
-                after { p ->
-                    val direction = p.args.getOrNull(0) as? Int ?: return@after
-                    main.post { source?.setWifiActivity(direction) }
-                })
-        }.onFailure { XposedBridge.log("3IN1: wifi-activity hook unavailable: $it") }
+            hookAfter(callbackClass, "onStateChanged", Int::class.javaPrimitiveType!!) { c ->
+                val direction = c.getArgs().getOrNull(0) as? Int ?: return@hookAfter
+                main.post { source?.setWifiActivity(direction) }
+            }
+        }.onFailure { log(Log.INFO, "3IN1", "wifi-activity hook unavailable: $it") }
 
-        XposedBridge.log("3IN1: hooks installed")
+        log(Log.INFO, "3IN1", "hooks installed")
     }
 
-    /** Xposed "after" callback with automatic failure handling. */
-    private fun after(block: (XC_MethodHook.MethodHookParam) -> Unit) = object : XC_MethodHook() {
-        override fun afterHookedMethod(param: MethodHookParam) {
-            try {
-                block(param)
-            } catch (error: Throwable) {
-                fail(error)
-            }
+    /**
+     * Hooks every method of [clazz] matching [name] and runs [block] after the original
+     * method returns, preserving its result. Failure inside [block] is routed to [fail].
+     */
+    private fun hookAllAfter(clazz: Class<*>, name: String, block: (XposedInterface.Chain) -> Unit) {
+        for (m in clazz.declaredMethods) {
+            if (m.name != name) continue
+            hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    try { block(chain) } catch (error: Throwable) { fail(error) }
+                    result
+                }
         }
+    }
+
+    /**
+     * Hooks a single method by exact signature. [block] runs before `proceed()`, so it can
+     * rewrite arguments (`chain.getArgs()` is a mutable list) or skip the original call.
+     */
+    private fun hookBefore(
+        clazz: Class<*>,
+        name: String,
+        vararg params: Class<*>,
+        block: (XposedInterface.Chain) -> Unit
+    ) {
+        val m = clazz.getDeclaredMethod(name, *params)
+        hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+            .intercept { chain ->
+                try { block(chain) } catch (error: Throwable) { fail(error) }
+                chain.proceed()
+            }
+    }
+
+    /**
+     * Hooks a single method by exact signature and runs [block] after it returns.
+     */
+    private fun hookAfter(
+        clazz: Class<*>,
+        name: String,
+        vararg params: Class<*>,
+        block: (XposedInterface.Chain) -> Unit
+    ) {
+        val m = clazz.getDeclaredMethod(name, *params)
+        hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+            .intercept { chain ->
+                val result = chain.proceed()
+                try { block(chain) } catch (error: Throwable) { fail(error) }
+                result
+            }
     }
 
     private inline fun <T> opt(block: () -> T): T? = try {
         block()
     } catch (error: Throwable) {
-        XposedBridge.log("3IN1: optional member unavailable: ${error.javaClass.simpleName}: ${error.message}")
+        log(Log.INFO, "3IN1", "optional member unavailable: ${error.javaClass.simpleName}: ${error.message}")
         null
     }
 
@@ -230,7 +265,7 @@ class ColorOsAdapter(private val loader: ClassLoader) {
     private fun attach(host: ViewGroup, lockscreen: Boolean) {
         if (failed || sessions.containsKey(host)) return
         val root = findIconRow(host) ?: run {
-            XposedBridge.log("3IN1: no icon row next to the battery view; keeping native icons")
+            log(Log.INFO, "3IN1", "no icon row next to the battery view; keeping native icons")
             return
         }
         initialize(host.context)
@@ -342,8 +377,8 @@ class ColorOsAdapter(private val loader: ClassLoader) {
         session.host.getGlobalVisibleRect(hostRect)
         val rowRect = Rect()
         session.root.getGlobalVisibleRect(rowRect)
-        XposedBridge.log(
-            "3IN1: anchor=${anchor?.javaClass?.simpleName} anchorRect=${rect.top}..${rect.bottom} " +
+        log(Log.INFO, "3IN1",
+" anchor=${anchor?.javaClass?.simpleName} anchorRect=${rect.top}..${rect.bottom} " +
                 "host=${session.host.javaClass.simpleName} hostRect=${hostRect.top}..${hostRect.bottom} " +
                 "row=${session.root.javaClass.simpleName} rowRect=${rowRect.top}..${rowRect.bottom}"
         )
@@ -353,7 +388,7 @@ class ColorOsAdapter(private val loader: ClassLoader) {
             view.getGlobalVisibleRect(r)
             names.add("${view.javaClass.simpleName}@${r.top}..${r.bottom}")
         }
-        if (names.isNotEmpty()) XposedBridge.log("3IN1: native icons ${names.joinToString(", ")}")
+        if (names.isNotEmpty()) log(Log.INFO, "3IN1", "native icons ${names.joinToString(", ")}")
     }
 
     private fun initialize(c: Context) {
@@ -366,11 +401,11 @@ class ColorOsAdapter(private val loader: ClassLoader) {
                 ?: java.io.File(c.applicationInfo.dataDir, "files")
             java.io.File(dir, "3in1-mirror.conf")
         }.getOrNull()
-        XposedBridge.log("3IN1: mirror file=${mirrorFile?.absolutePath}")
+        log(Log.INFO, "3IN1", "mirror file=${mirrorFile?.absolutePath}")
         c.registerReceiver(object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent?.action == IndicatorConfig.REFRESH) {
-                    XposedBridge.log("3IN1: refresh broadcast received, reloading settings")
+                    log(Log.INFO, "3IN1", "refresh broadcast received, reloading settings")
                     intent.getStringExtra(IndicatorConfig.PROBE_TOKEN)
                         ?.takeIf { it.isNotBlank() }
                         ?.let { pendingProbeToken = it }
@@ -414,18 +449,8 @@ class ColorOsAdapter(private val loader: ClassLoader) {
         return IndicatorConfig()
     }
 
-    /** Locally available settings: the preferences bridge first, the mirror as fallback. */
+    /** Locally available settings: the in-process mirror file as the only local source. */
     private fun readLocalConfig(): Pair<IndicatorConfig, String>? {
-        // XSharedPreferences is served by the app process; an empty preference set means the
-        // app has not been started yet and must not override the mirror.
-        val prefs = runCatching {
-            val p = XSharedPreferences(IndicatorConfig.PACKAGE, IndicatorConfig.FILE)
-            p.reload()
-            p
-        }.getOrNull()
-        if (prefs != null && runCatching { prefs.all.isNotEmpty() }.getOrDefault(false)) {
-            return IndicatorConfig.read(prefs) to "xsharedprefs"
-        }
         val mirror = readMirror()
         return if (mirror != null) mirror to "mirror" else null
     }
@@ -437,7 +462,7 @@ class ColorOsAdapter(private val loader: ClassLoader) {
             val bundle = runCatching {
                 ctx.contentResolver.call(
                     Uri.parse("content://${IndicatorConfig.PACKAGE}.config"), "config", null, null)
-            }.onFailure { XposedBridge.log("3IN1: provider call failed: ${it.message}") }.getOrNull()
+            }.onFailure { log(Log.INFO, "3IN1", "provider call failed: ${it.message}") }.getOrNull()
             val rev = runCatching {
                 ctx.contentResolver.call(
                     Uri.parse("content://${IndicatorConfig.PACKAGE}.config"), "revision", null, null)
@@ -460,8 +485,8 @@ class ColorOsAdapter(private val loader: ClassLoader) {
         revision = if (source == "mirror") mirrorRevision else rev
         if (source == "provider" || source == "xsharedprefs") writeMirror(cfg, rev)
         lastConfigSource = source
-        XposedBridge.log(
-            "3IN1: config[$source] enabled=${cfg.enabled} dualSim=${cfg.dualSim} " +
+        log(Log.INFO, "3IN1",
+" config[$source] enabled=${cfg.enabled} dualSim=${cfg.dualSim} " +
                 "size=${cfg.size} dotScale=${cfg.dotScale} swap=${cfg.swap} " +
                 "showActivity=${cfg.showActivity} showVpn=${cfg.showVpn}"
         )
@@ -500,7 +525,7 @@ class ColorOsAdapter(private val loader: ClassLoader) {
             }
             file.parentFile?.mkdirs()
             file.writeText(text)
-        }.onFailure { XposedBridge.log("3IN1: mirror write failed: ${it.message}") }
+        }.onFailure { log(Log.INFO, "3IN1", "mirror write failed: ${it.message}") }
     }
 
     private fun readMirror(): IndicatorConfig? = runCatching {
@@ -558,8 +583,8 @@ class ColorOsAdapter(private val loader: ClassLoader) {
                 state = next
                 if (changed) {
                     lastFingerprint = fingerprint
-                    XposedBridge.log(
-                        "3IN1: state battery=${next.battery} observed=${next.batteryObserved} " +
+                    log(Log.INFO, "3IN1",
+                        "state battery=${next.battery} observed=${next.batteryObserved} " +
                             "netReady=${next.networkReady} sim=${next.sim} wifi=${next.wifi} " +
                             "airplane=${next.airplane} level=${next.mobileLevel} " +
                             "dots=${next.dots} sims=${next.sims.size} " +
@@ -569,7 +594,7 @@ class ColorOsAdapter(private val loader: ClassLoader) {
                     )
                 }
                 guarded { refresh(); if (wasReady != state.ready) report() }
-            }, { fail(it) }).also { it.start() }
+            }, { fail(it) }, log).also { it.start() }
         }
     }
 
@@ -754,7 +779,7 @@ class ColorOsAdapter(private val loader: ClassLoader) {
             sessions.values.any { it.active } -> "模块已运行"
             else -> "模块已加载；当前显示位置未启用"
         }
-        XposedBridge.log("3IN1: $text; revision=$revision; hosts=${sessions.size}")
+        log(Log.INFO, "3IN1", "$text; revision=$revision; hosts=${sessions.size}")
         main.post {
             runCatching {
                 ctx.contentResolver.call(
@@ -767,7 +792,7 @@ class ColorOsAdapter(private val loader: ClassLoader) {
             }.onFailure {
                 // A swallowed failure here leaves the settings screen showing a stale
                 // receipt, so the reason has to reach the log.
-                XposedBridge.log("3IN1: report failed: $it")
+                log(Log.INFO, "3IN1", "report failed: $it")
             }
         }
     }
@@ -798,7 +823,7 @@ class ColorOsAdapter(private val loader: ClassLoader) {
         } finally {
             changingVisibility = false
         }
-        XposedBridge.log("3IN1 restored stock icons: $error")
+        log(Log.INFO, "3IN1", "restored stock icons: $error")
         report()
     }
 

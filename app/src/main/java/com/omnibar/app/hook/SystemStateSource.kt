@@ -22,7 +22,7 @@ import android.telephony.SubscriptionManager
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyDisplayInfo
 import android.telephony.TelephonyManager
-import de.robv.android.xposed.XposedBridge
+import android.util.Log
 import com.omnibar.app.model.BatteryPhase
 import com.omnibar.app.model.BatterySnapshot
 import com.omnibar.app.model.ChargeProtocol
@@ -44,7 +44,8 @@ import java.util.concurrent.Executors
 class SystemStateSource(
     private val context: Context,
     private val changed: (IndicatorState) -> Unit,
-    private val failed: (Throwable) -> Unit
+    private val failed: (Throwable) -> Unit,
+    private val log: (Int, String, String) -> Unit
 ) {
     private val handler = Handler(Looper.getMainLooper())
     private val executor = Executors.newSingleThreadExecutor()
@@ -353,8 +354,8 @@ class SystemStateSource(
             val tech = CHARGE_TECHNOLOGY_PATHS.firstNotNullOfOrNull { readSysfsLine(it) } ?: "n/a"
             val type = CHARGE_TYPE_PATHS.firstNotNullOfOrNull { readSysfsLine(it) } ?: "n/a"
             val usbType = readUsbTypeActive() ?: "n/a"
-            XposedBridge.log(
-                "3IN1: charge protocol=$protocol (sysfs=$sysfs node=[tech=$tech type=$type usb=$usbType]) " +
+            log(Log.INFO, "3IN1",
+                "charge protocol=$protocol (sysfs=$sysfs node=[tech=$tech type=$type usb=$usbType]) " +
                     "negotiated=${negotiatedVoltageMv}mV/${negotiatedCurrentMa}mA " +
                     "oplus=[fastType=$oplusFastType ppsMode=$oplusPpsMode tech=$oplusChargeTechnology " +
                     "plugged=$oplusChargePlugged fast=$oplusFastCharger v=${oplusChargerVoltageMv}mV w=${oplusWatts}] " +
@@ -537,7 +538,7 @@ class SystemStateSource(
                 addAction(OPLUS_BATTERY_CHANGED)
                 addAction(OPLUS_UI_BATTERY_CHANGED)
             }, Context.RECEIVER_EXPORTED)
-        }.onFailure { XposedBridge.log("3IN1: oplus charge broadcast unavailable: $it") }
+        }.onFailure { log(Log.INFO, "3IN1", "oplus charge broadcast unavailable: $it") }
 
         connectivity.registerNetworkCallback(
             NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(),
@@ -548,14 +549,14 @@ class SystemStateSource(
             ?.let {
                 current = BatterySnapshot.apply(current, it)
                 refreshChargerTelemetry()
-                XposedBridge.log("3IN1: sticky battery level=${current.battery} observed=${current.batteryObserved}")
+                log(Log.INFO, "3IN1", "sticky battery level=${current.battery} observed=${current.batteryObserved}")
             }
-            ?: XposedBridge.log("3IN1: no sticky battery broadcast received")
+            ?: log(Log.INFO, "3IN1", "no sticky battery broadcast received")
         current = current.copy(powerSave = power.isPowerSaveMode, airplane = isAirplane())
 
         registerSignalListeners()
         runCatching { subs.addOnSubscriptionsChangedListener(executor, subListener) }
-            .onFailure { XposedBridge.log("3IN1: subscription listener unavailable: $it") }
+            .onFailure { log(Log.INFO, "3IN1", "subscription listener unavailable: $it") }
         schedule()
         handler.postDelayed(activityPoll, 1500)
     }
@@ -683,7 +684,7 @@ class SystemStateSource(
         }
         simCallbacks[id] = tm to callback
         runCatching { tm.registerTelephonyCallback(executor, callback) }
-            .onFailure { XposedBridge.log("3IN1: signal listener for sub $id unavailable: $it") }
+            .onFailure { log(Log.INFO, "3IN1", "signal listener for sub $id unavailable: $it") }
     }
 
     private fun updateSim(id: Int, transform: (IndicatorSim) -> IndicatorSim) {
@@ -761,7 +762,7 @@ class SystemStateSource(
         val sig = sims.joinToString(prefix = "[", postfix = "]") { "${it.slot}:${it.level}:${it.phase}" }
         if (sig != lastSimsSig) {
             lastSimsSig = sig
-            XposedBridge.log("3IN1: sims=$sig defaultSub=$defaultSub")
+            log(Log.INFO, "3IN1", "sims=$sig defaultSub=$defaultSub")
         }
     }
 

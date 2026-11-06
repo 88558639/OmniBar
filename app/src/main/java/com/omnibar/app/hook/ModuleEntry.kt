@@ -1,20 +1,23 @@
 package com.omnibar.app.hook
 
-import de.robv.android.xposed.IXposedHookLoadPackage
-import de.robv.android.xposed.XposedBridge
-import de.robv.android.xposed.callbacks.XC_LoadPackage
+import android.util.Log
+import io.github.libxposed.api.XposedModule
+import io.github.libxposed.api.XposedModuleInterface
 
 /**
- * Legacy Xposed entry point (LSPosed supports legacy modules natively).
+ * libxposed entry point (LSPosed 2.x, Xposed API 102).
  *
- * The ColorOS contract is resolved lazily and defensively inside [ColorOsAdapter], so a
- * partially matching firmware degrades individual features instead of disabling the module.
+ * The entry class is registered in `META-INF/xposed/java_init.list`; the framework
+ * instantiates it inside the SystemUI process and calls [onPackageLoaded] once the
+ * package is loaded. The ColorOS contract is resolved lazily and defensively inside
+ * [ColorOsAdapter], so a partially matching firmware degrades individual features
+ * instead of disabling the module.
  */
-class ModuleEntry : IXposedHookLoadPackage {
-    override fun handleLoadPackage(param: XC_LoadPackage.LoadPackageParam) {
-        if (param.packageName != "com.android.systemui" || param.processName != "com.android.systemui") return
-        XposedBridge.log("3IN1: SystemUI entry")
-        runCatching { ColorOsAdapter(param.classLoader).install() }
-            .onFailure { XposedBridge.log("3IN1: adapter unavailable: $it") }
+class ModuleEntry : XposedModule() {
+    override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
+        if (param.packageName != "com.android.systemui" || !param.isFirstPackage) return
+        log(Log.INFO, "3IN1", "SystemUI entry")
+        runCatching { ColorOsAdapter(param.defaultClassLoader, ::hook, ::log).install() }
+            .onFailure { log(Log.ERROR, "3IN1", "adapter unavailable: $it") }
     }
 }

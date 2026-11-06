@@ -1,7 +1,7 @@
 package com.omnibar.app
 
 import android.graphics.*
-import android.graphics.drawable.AdaptiveIconDrawable
+import android.graphics.drawable.BitmapDrawable
 import com.omnibar.app.config.IndicatorConfig
 import com.omnibar.app.model.*
 import com.omnibar.app.render.IndicatorRenderer
@@ -324,21 +324,18 @@ class VisualRevisionTest {
         save(sheet, "visual-0.1.3.png")
     }
 
-    @Test fun launcherUsesNewAdaptiveArtworkAndMonochromeLayer() {
+    @Test fun launcherUsesLegacyDensityArtwork() {
         val context = RuntimeEnvironment.getApplication()
-        val icon = context.getDrawable(R.mipmap.ic_launcher) as AdaptiveIconDrawable
-        assertNotNull(icon.monochrome)
+        // The adaptive icon was dropped in favour of legacy density mipmaps so the artwork
+        // renders 1:1 without the system's ~66% foreground scale clipping it.
+        val icon = context.getDrawable(R.mipmap.ic_launcher) as BitmapDrawable
+        assertNotNull(icon.bitmap)
         val b = Bitmap.createBitmap(640, 320, Bitmap.Config.ARGB_8888)
         val c = Canvas(b)
         c.drawColor(Color.rgb(225, 228, 233))
         icon.setBounds(20, 20, 300, 300)
         icon.draw(c)
-        icon.monochrome!!.apply {
-            setBounds(340, 20, 620, 300)
-            setTint(Color.rgb(55, 76, 90))
-            draw(c)
-        }
-        save(b, "launcher-0.1.3.png")
+        save(b, "launcher-0.1.10.png")
     }
 
     private fun save(bitmap: Bitmap, name: String) {
