@@ -151,10 +151,10 @@ class MainActivity : Activity() {
         }, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginEnd = dp(12) })
 
         val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        titles.addView(label("3IN1", 22f).apply {
+        titles.addView(label("OmniBar", 22f).apply {
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         })
-        titles.addView(label("状态栏三合一 · ColorOS 17", 12f, palette.muted))
+        titles.addView(label("状态栏多合一 · ColorOS 17", 12f, palette.muted))
         bar.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
         return bar.apply {
             layoutParams = LinearLayout.LayoutParams(-1, dp(62))
@@ -286,7 +286,7 @@ class MainActivity : Activity() {
                 setOnClickListener {
                     val version = packageManager.getPackageInfo(packageName, 0).versionName
                     AlertDialog.Builder(this@MainActivity)
-                        .setTitle("关于 3IN1")
+                        .setTitle("关于 OmniBar")
                         .setIcon(R.mipmap.ic_launcher)
                         .setMessage("版本 $version")
                         .setNegativeButton("关闭", null)

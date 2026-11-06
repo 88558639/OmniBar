@@ -9,7 +9,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="3IN1"
+        android:label="OmniBar"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/AppTheme"
