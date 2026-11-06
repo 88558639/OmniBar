@@ -126,6 +126,7 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this).apply {
             isFillViewport = true
             clipToPadding = false
+            isVerticalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
         }
         content = LinearLayout(this).apply {
@@ -146,7 +147,7 @@ class MainActivity : Activity() {
         bar.addView(ImageView(this).apply {
             setImageResource(R.mipmap.ic_launcher)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            background = rounded(palette.surface, 12f, palette.stroke)
+            background = rounded(palette.surface, 12f)
             setPadding(dp(3), dp(3), dp(3), dp(3))
         }, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginEnd = dp(12) })
 
@@ -166,7 +167,7 @@ class MainActivity : Activity() {
     private fun buildHero() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = rounded(palette.surface, 20f, palette.stroke)
+            background = rounded(palette.surface, 20f)
             setPadding(dp(16), dp(16), dp(16), dp(14))
         }
         content.addView(card, LinearLayout.LayoutParams(-1, -2))
@@ -281,7 +282,7 @@ class MainActivity : Activity() {
                 text = "关于"
                 textSize = 15f
                 setTextColor(palette.ink)
-                background = rounded(palette.surface, 16f, palette.stroke)
+                background = rounded(palette.surface, 18f)
                 isAllCaps = false
                 setOnClickListener {
                     val version = packageManager.getPackageInfo(packageName, 0).versionName
@@ -313,7 +314,7 @@ class MainActivity : Activity() {
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(22) })
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = rounded(palette.surface, 18f, palette.stroke)
+            background = rounded(palette.surface, 20f)
             setPadding(dp(14), dp(4), dp(14), dp(4))
         }
         content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
@@ -491,7 +492,7 @@ class MainActivity : Activity() {
             matchedProbe || probeStatus.isNotEmpty() -> probeStatus
             else -> legacyStatus
         }
-        statusLabel.text = status.ifEmpty { "尚未收到 SystemUI 回执" }
+        statusLabel.text = status.ifEmpty { "模块未启用" }
         statusDot.color = when {
             // The module reports "模块已运行"; the older wording still shows up while
             // SystemUI runs a previous build of the module.
