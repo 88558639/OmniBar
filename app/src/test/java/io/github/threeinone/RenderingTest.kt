@@ -383,6 +383,35 @@ class RenderingTest {
         captureActivity("settings-light.png", 1179, 2556)
     }
 
+    /**
+     * Renders the "已充满紫色" state as a high-resolution transparent PNG, ready to be
+     * dropped in as the launcher icon. The state is the full-charge purple (SuperVOOC):
+     * battery 100 + FULL phase + SUPER_VOOC protocol, so the number, the bolt and the
+     * battery arc all come out in the violet #9C6BFF. The tint is the same violet so the
+     * Wi-Fi fan and the signal dots read in the same purple — the whole indicator is one
+     * colour, exactly as it appears in the status bar while full and charging.
+     */
+    @Test fun fullChargePurpleIconContactSheet() {
+        val state = IndicatorState.demo.copy(
+            battery = 100,
+            batteryPhase = BatteryPhase.FULL,
+            chargeProtocol = ChargeProtocol.SUPER_VOOC
+        )
+        val violet = IndicatorConfig().voocColor
+        // Render a large, transparent, anti-aliased tile. The indicator is drawn into a
+        // centred square inset by 12% on every side, so the finished icon keeps an even
+        // breathing margin instead of hugging the top edge (the percentage sits at the
+        // top of the 100-unit box, which otherwise crowds the launcher's rounded mask).
+        val size = 1024
+        val inset = size * 0.12f
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.translate(inset, inset)
+        val drawSize = size - inset * 2
+        IndicatorRenderer().draw(canvas, drawSize, drawSize, state, IndicatorConfig(), violet)
+        save(bitmap, "icon-full-charge-purple.png")
+    }
+
     @Test
     @Config(qualifiers = "zh-rCN-w393dp-h852dp-night-xxhdpi")
     fun settingsDarkTheme() {
