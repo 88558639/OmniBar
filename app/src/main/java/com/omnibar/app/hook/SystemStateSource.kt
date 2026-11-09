@@ -15,6 +15,7 @@ import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.telephony.ServiceState
 import android.telephony.SignalStrength
@@ -32,6 +33,30 @@ import com.omnibar.app.model.IndicatorState
 import com.omnibar.app.model.SimPhase
 import com.omnibar.app.model.WifiStatus
 import java.util.concurrent.Executors
+
+/**
+ * One unsettled signal-strength window for a subscription. [since] is when the
+ * current [level] was first seen continuously, [windowStart] is when the whole
+ * window opened, and [votes] counts every reading seen so far. The vote tally is
+ * what lets a permanently oscillating radio converge instead of staying frozen.
+ */
+class SignalWatch(
+    var level: Int,
+    var since: Long,
+    val windowStart: Long,
+    val votes: IntArray = IntArray(5)
+) {
+    init { votes[level]++ }
+
+    fun vote(next: Int, now: Long): SignalWatch {
+        votes[next]++
+        if (next != level) {
+            level = next
+            since = now
+        }
+        return this
+    }
+}
 
 /**
  * Collects the indicator state from public Android APIs only — no reflection into SystemUI
@@ -109,6 +134,17 @@ class SystemStateSource(
     private var pendingCount = 0
     private var lastStableSignature: String? = null
     private var settleActive = false
+
+    /**
+     * Pending signal level per subscription. `SignalStrength.level` is an
+     * instantaneous quantisation of RSRP and flips around the carrier thresholds
+     * even when the phone has not moved, so candidates wait here instead of being
+     * painted immediately.
+     */
+    private val pendingSignalLevels = HashMap<Int, SignalWatch>()
+
+    /** Subscriptions whose first reading has already established a baseline level. */
+    private val signalBaselines = HashSet<Int>()
 
     /**
      * Oplus sysfs nodes that carry the "快充模式" protocol name. These are the exact
@@ -620,6 +656,8 @@ class SystemStateSource(
             } else DataActivity.NONE
             lastRx = rx
             lastTx = tx
+            // Commit signal levels that have stayed put long enough.
+            flushSignalLevels()
             // Re-read the subscriptions now and then so a card that was switched off
             // disappears from the indicator even if no telephony callback arrives.
             if (tick++ % 4 == 0) buildCurrent()
@@ -686,6 +724,8 @@ class SystemStateSource(
         pendingSignature = null
         pendingCount = 0
         lastStableSignature = null
+        pendingSignalLevels.clear()
+        signalBaselines.clear()
         runCatching { context.unregisterReceiver(batteryReceiver) }
         runCatching { context.unregisterReceiver(miscReceiver) }
         runCatching { context.unregisterReceiver(oplusReceiver) }
@@ -733,6 +773,8 @@ class SystemStateSource(
         val present = active.map { it.subscriptionId }.toSet()
         (simStates.keys - present).forEach { id ->
             simStates.remove(id)
+            pendingSignalLevels.remove(id)
+            signalBaselines.remove(id)
             simCallbacks.remove(id)?.let { (tm, cb) ->
                 runCatching { tm.unregisterTelephonyCallback(cb) }
             }
@@ -759,14 +801,19 @@ class SystemStateSource(
             TelephonyCallback.ServiceStateListener {
             override fun onSignalStrengthsChanged(s: SignalStrength) {
                 val level = s.level.coerceIn(0, 4)
+                // Never paint the instantaneous level: it flips around the carrier
+                // thresholds while the phone is stationary. Only remember a candidate;
+                // flushSignalLevels() commits it once it has stopped moving.
+                noteSignalLevel(id, level)
                 updateSim(id) { current ->
-                    // A non-zero level means the radio has a live signal. Some firmwares
-                    // report a stale/out-of-service ServiceState while the bearer is up,
-                    // so the strength is the more reliable indicator here.
-                    val phase = if (level > 0 && current.phase != SimPhase.ABSENT &&
+                    // A non-zero committed level means the radio has a live signal. Some
+                    // firmwares report a stale ServiceState while the bearer is up, so the
+                    // strength is the more reliable indicator here. Use the committed
+                    // level, not the transient reading, so the phase cannot flicker either.
+                    val phase = if (current.level > 0 && current.phase != SimPhase.ABSENT &&
                         current.phase != SimPhase.LOCKED
                     ) SimPhase.READY else current.phase
-                    current.copy(level = level, phase = phase)
+                    current.copy(phase = phase)
                 }
                 schedule()
             }
@@ -812,6 +859,57 @@ class SystemStateSource(
     private fun updateSim(id: Int, transform: (IndicatorSim) -> IndicatorSim) {
         val prev = simStates[id] ?: return
         simStates[id] = transform(prev)
+    }
+
+    /**
+     * Records a signal-level candidate. The very first reading for a subscription is
+     * committed straight away: without a baseline a radio that never stops oscillating
+     * would otherwise stay at zero bars forever. Afterwards a reading equal to the
+     * committed level cancels any pending change, which is what stops the 1 → 3 → 1
+     * flicker — the dip never survives long enough to be submitted.
+     */
+    private fun noteSignalLevel(id: Int, level: Int) {
+        val state = simStates[id] ?: return
+        if (id !in signalBaselines) {
+            signalBaselines.add(id)
+            pendingSignalLevels.remove(id)
+            if (state.level != level) simStates[id] = state.copy(level = level)
+            schedule()
+            return
+        }
+        val now = SystemClock.elapsedRealtime()
+        val next = signalPending(pendingSignalLevels[id], level, state.level, now)
+        if (next == null) pendingSignalLevels.remove(id) else pendingSignalLevels[id] = next
+    }
+
+    /**
+     * Commits candidates that have stopped moving. Dropping a bar is deliberately
+     * slower than gaining one, so a brief dip never shows up, while a real loss of
+     * signal still reaches the indicator. If a radio oscillates without ever settling,
+     * the dominant reading is committed once the window times out so the indicator
+     * can still follow a genuine move instead of freezing at an old value.
+     * Runs from the existing 1.5 s activity poll.
+     */
+    private fun flushSignalLevels() {
+        if (pendingSignalLevels.isEmpty()) return
+        val now = SystemClock.elapsedRealtime()
+        var changed = false
+        pendingSignalLevels.entries.toList().forEach { (id, watch) ->
+            val state = simStates[id]
+            if (state == null) {
+                pendingSignalLevels.remove(id)
+                return@forEach
+            }
+            val forced = now - watch.windowStart >= SIGNAL_MAX_PENDING_MS
+            val settled = signalLevelSettled(watch.level, state.level, now - watch.since)
+            if (!settled && !forced) return@forEach
+            val next = if (settled) watch.level else signalDominantLevel(watch.votes, state.level)
+            pendingSignalLevels.remove(id)
+            if (state.level == next) return@forEach
+            simStates[id] = state.copy(level = next)
+            changed = true
+        }
+        if (changed) schedule()
     }
 
     private fun isAirplane() =
@@ -899,6 +997,56 @@ class SystemStateSource(
     }
 
     companion object {
+        /** A signal level must stay put this long before it reaches the indicator. */
+        const val SIGNAL_SETTLE_MS = 2500L
+
+        /** Dropping a bar is slower, so a momentary dip never flashes. */
+        const val SIGNAL_DROP_SETTLE_MS = 5000L
+
+        /** Upper bound of an oscillating window; after this the dominant level wins. */
+        const val SIGNAL_MAX_PENDING_MS = 12000L
+
+        /** Pure helper: a new reading advances (or resets) the settle window. */
+        fun signalPending(
+            previous: SignalWatch?, level: Int, committed: Int, now: Long
+        ): SignalWatch? {
+            if (level == committed) return null
+            if (previous == null) return SignalWatch(level, now, now)
+            return previous.vote(level, now)
+        }
+
+        /** Pure helper: has a candidate been stable long enough to commit? */
+        fun signalLevelSettled(candidate: Int, committed: Int, elapsedMs: Long): Boolean {
+            if (candidate == committed) return false
+            val required = if (candidate < committed) SIGNAL_DROP_SETTLE_MS else SIGNAL_SETTLE_MS
+            return elapsedMs >= required
+        }
+
+        /**
+         * Pure helper: pick the level seen most often in a window that never settled.
+         * Ties go to the value closest to the committed level (and then to the higher
+         * one), so the result is deterministic and the display converges instead of
+         * flipping between equally frequent readings on every timeout.
+         */
+        fun signalDominantLevel(votes: IntArray, committed: Int): Int {
+            var best = committed
+            var bestVotes = -1
+            for (level in votes.indices) {
+                val count = votes[level]
+                if (count == 0) continue
+                if (count > bestVotes ||
+                    (count == bestVotes &&
+                        (kotlin.math.abs(level - committed) < kotlin.math.abs(best - committed) ||
+                            (kotlin.math.abs(level - committed) == kotlin.math.abs(best - committed) &&
+                                level > best)))
+                ) {
+                    best = level
+                    bestVotes = count
+                }
+            }
+            return best
+        }
+
         /** Sampling period of the negotiation settle window. */
         const val SETTLE_INTERVAL_MS = 300L
 
