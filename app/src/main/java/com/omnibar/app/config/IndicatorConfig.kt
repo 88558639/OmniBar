@@ -285,10 +285,10 @@ data class IndicatorConfig(
         )
 
         // WCAG-based visibility floor for custom status colours.
-        // Mirrors status-trio's BatteryStatusColorResolver: a user colour whose worst-case
-        // contrast against reference backgrounds falls below the floor is mixed toward
-        // black/white just far enough to pass. The original selection is preserved in
-        // SharedPreferences; only the drawn colour moves.
+        // A user colour whose worst-case contrast against reference backgrounds falls
+        // below the floor is mixed toward black/white just far enough to pass. The
+        // original selection is preserved in SharedPreferences; only the drawn
+        // colour moves.
         fun ensureVisible(color: Int): Int {
             val floor = 1.2
             val base = toRgb(color)
@@ -305,10 +305,10 @@ data class IndicatorConfig(
 }
 
 // ---- WCAG-based visibility floor for custom status colours ----
-// Mirrors status-trio's BatteryStatusColorResolver: a user colour whose worst-case
-// contrast against the reference menu backgrounds falls below the floor is mixed
-// toward black/white just far enough to pass. The original selection is preserved
-// in SharedPreferences; only the drawn colour moves.
+// A user colour whose worst-case contrast against the reference menu backgrounds
+// falls below the floor is mixed toward black/white just far enough to pass. The
+// original selection is preserved in SharedPreferences; only the drawn colour
+// moves.
 private data class Rgb(val r: Double, val g: Double, val b: Double)
 private fun toRgb(color: Int): Rgb = Rgb(
     (color shr 16 and 0xFF) / 255.0,
