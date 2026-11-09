@@ -157,9 +157,9 @@ class NetworkBandTest {
         // The mark has to reach over the top of the outer arc, so that it covers the
         // whole signal stack instead of hiding between the arcs.
         assertEquals("The ! does not start at the outer arc: ${bang.toList()}",
-            IndicatorRenderer.WIFI_MARK_TOP, bang[1], 2f)
+            IndicatorRenderer.WIFI_MARK_TOP - IndicatorRenderer.INNER_SHIFT, bang[1], 2f)
         assertEquals("The ? does not start at the outer arc: ${question.toList()}",
-            IndicatorRenderer.WIFI_MARK_TOP, question[1], 2f)
+            IndicatorRenderer.WIFI_MARK_TOP - IndicatorRenderer.INNER_SHIFT, question[1], 2f)
         // Both have to stay inside the fan and off the signal dots.
         assertTrue("The ! is off-centre: ${bang.toList()}", bang[0] > 40f && bang[2] < 60f)
         assertTrue("The ? is off-centre: ${question.toList()}", question[0] > 36f && question[2] < 64f)
@@ -203,8 +203,9 @@ class NetworkBandTest {
         val plain = render(demo.copy(wifi = WifiPhase.CONNECTED))
         val marked = render(demo.copy(wifi = WifiPhase.NO_INTERNET))
         // A point on the outer arc's left shoulder — away from the mark in the middle.
+        // The whole fan is lifted by INNER_SHIFT, so the shoulder moves up with it.
         val x = ((50f - 25f * 0.866f) * px).toInt()
-        val y = ((70f - 25f * 0.5f) * px).toInt()
+        val y = (((70f - IndicatorRenderer.INNER_SHIFT) - 25f * 0.5f) * px).toInt()
         val plainAlpha = Color.alpha(plain.getPixel(x, y))
         val markedAlpha = Color.alpha(marked.getPixel(x, y))
         assertTrue("The arc is missing", plainAlpha > 200)

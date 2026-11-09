@@ -53,6 +53,7 @@ data class IndicatorState(
     val powerSave: Boolean = false,
     val wifi: WifiPhase = WifiPhase.OFF,
     val wifiLevel: Int = 0,
+    val wifiGeneration: Int = 0,
     val sim: SimPhase = SimPhase.UNKNOWN,
     val mobileLevel: Int = 0,
     val networkType: String = "",

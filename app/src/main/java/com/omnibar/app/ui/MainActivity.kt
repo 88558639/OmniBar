@@ -2,11 +2,12 @@ package com.omnibar.app.ui
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Dialog
 import android.content.*
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
-import android.net.Uri
+import android.graphics.drawable.ColorDrawable
 import android.os.*
 import android.text.InputType
 import android.view.*
@@ -279,32 +280,85 @@ class MainActivity : Activity() {
     private fun buildFooter() {
         content.addView(
             Button(this).apply {
-                text = "关于"
+                text = "更新日志"
                 textSize = 15f
                 setTextColor(palette.ink)
                 background = rounded(palette.surface, 18f)
                 isAllCaps = false
                 elevation = 0f
                 stateListAnimator = null
-                setOnClickListener {
-                    val version = packageManager.getPackageInfo(packageName, 0).versionName
-                    AlertDialog.Builder(this@MainActivity)
-                        .setTitle("关于 OmniBar")
-                        .setIcon(R.mipmap.ic_launcher)
-                        .setMessage("版本 $version")
-                        .setNegativeButton("关闭", null)
-                        .setPositiveButton("作者主页") { _, _ ->
-                            try {
-                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.coolapk.com/u/17348848")))
-                            } catch (_: ActivityNotFoundException) {
-                                Toast.makeText(this@MainActivity, "未找到可打开链接的应用", Toast.LENGTH_SHORT).show()
-                            }
-                        }.show()
-                }
+                setOnClickListener { showChangelog() }
             },
             LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(10) }
         )
     }
+
+    /** The changelog sheet, styled to match the app instead of the stock alert dialog. */
+    private fun showChangelog() {
+        val dialog = Dialog(this).apply {
+            window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            window?.setDimAmount(0.45f)
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(palette.surface, 24f)
+            setPadding(dp(20), dp(18), dp(20), dp(20))
+        }
+        // Title in the brand accent, with no close button — tap outside to dismiss.
+        panel.addView(
+            label("更新日志", 18f, palette.accent).apply {
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            }
+        )
+        val scroll = ScrollView(this).apply {
+            isVerticalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+        }
+        val body = label(CHANGELOG, 14f, palette.ink).apply {
+            setLineSpacing(dp(4).toFloat(), 1f)
+            setPadding(0, dp(14), 0, 0)
+        }
+        scroll.addView(body)
+        panel.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        dialog.setContentView(panel)
+        val metrics = resources.displayMetrics
+        val maxW = (metrics.widthPixels * 0.86f).toInt()
+        val maxH = (metrics.heightPixels * 0.72f).toInt()
+        dialog.show()
+        dialog.window?.setLayout(maxW, maxH)
+    }
+
+    /** 最近 10 次更新日志。 */
+    private val CHANGELOG = """
+        2026.11.09
+        新增 WiFi 代数显示（WiFi 图标右下角标 5/6/7/8）
+        圈内元素整体上移，外圈不变
+        「关于」改为「更新日志」
+
+        2026.11.05
+        优化状态栏指示器渲染细节
+
+        2026.11.04
+        界面换成蓝色风格，去掉滚动条
+
+        2026.11.03
+        修复「关于」按钮阴影显示异常
+
+        2026.11.02
+        模块正式定名 OmniBar
+
+        2026.11.01
+        迁移到 libxposed API 102
+
+        2026.10.31
+        修复真机图标溢出问题
+
+        2026.10.30
+        重新设计应用图标
+
+        2026.10.29
+        修复模块加载时参数不可变导致的崩溃
+    """.trimIndent()
 
     // ------------------------------------------------------------------ building blocks
 

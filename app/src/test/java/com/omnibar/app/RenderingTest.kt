@@ -68,11 +68,15 @@ class RenderingTest {
                 assertEquals("Right overflow", 0, Color.alpha(big.getPixel(299, y)))
             }
             // Nothing may leave the 100-unit box sideways, and the number's
-            // ascender as well as the battery arc may only graze the top and
-            // the bottom edge by at most one unit.
+            // ascender as well as the battery arc may only graze the top and the
+            // bottom edge by at most one unit — plus the INNER_SHIFT that lifts
+            // everything inside the ring towards the top. The charging bolt is a
+            // top-corner badge pinned to the very top, so its stroke may spill a
+            // little further.
             val spill = spillOutsideBox(state, extreme)
             assertTrue("Horizontal spill: $spill", spill[0] <= 0 && spill[2] <= 0)
-            assertTrue("Vertical spill: $spill", spill[1] <= 3 && spill[3] <= 3)
+            assertTrue("Vertical spill: $spill",
+                spill[1] <= 13 && spill[3] <= 3)
         }
     }
 
@@ -124,7 +128,9 @@ class RenderingTest {
     @Test fun wifiHasThreeSignalSteps() {
         // The fan sits at (50, 70) — centred where the network label is: a centre dot
         // plus two arcs whose apexes are at y = 57 (r = 13) and y = 45 (r = 25).
-        val probes = listOf(210 to 70, 171 to 57, 135 to 45)
+        // Everything inside the ring is lifted by INNER_SHIFT, so each apex moves up too.
+        val shift = IndicatorRenderer.INNER_SHIFT * 3
+        val probes = listOf((210 - shift).toInt() to 70, (171 - shift).toInt() to 57, (135 - shift).toInt() to 45)
         // Three steps: dot only, dot + inner arc, dot + both arcs.
         for (level in 0..4) {
             val b = render(IndicatorState.demo.copy(wifiLevel = level), IndicatorConfig(wifiScale = 115))

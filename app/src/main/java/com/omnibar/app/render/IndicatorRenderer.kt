@@ -34,6 +34,14 @@ class IndicatorRenderer {
         /** Vertical centre of that ring. */
         const val RING_CENTER_Y = 53f
 
+        /**
+         * How far everything inside the ring is lifted above its natural place. The outer
+         * ring (signal dots + battery arc) is drawn at the fixed centre; the battery
+         * number, corner badges, Wi-Fi fan / network label and traffic arrows all shift up
+         * by this amount together.
+         */
+        const val INNER_SHIFT = 4f
+
         /** Signal dot radius. */
         const val SIGNAL_DOT_RADIUS = 5.4f
 
@@ -91,10 +99,11 @@ class IndicatorRenderer {
         /**
          * Centre of the label band.
          *
-         * The label takes the place of the Wi-Fi fan, so it is centred where the fan is:
-         * in the middle of the signal dot ring instead of sagging towards the bottom.
+         * The label takes the place of the Wi-Fi fan, so it is centred where the fan's
+         * visual mass sits: the fan's arcs and dot cluster around y = 70, so the label is
+         * dropped to the same line instead of floating near the ring's own centre (53).
          */
-        const val NETWORK_LABEL_CENTER = 54f
+        const val NETWORK_LABEL_CENTER = 60f
 
         /**
          * Widest the label may get before it would touch the signal dots.
@@ -166,6 +175,21 @@ class IndicatorRenderer {
          * the mark always fills the same slot in the fan.
          */
         const val WIFI_MARK_HEIGHT = 32f
+
+        /**
+         * Font size of the Wi-Fi generation badge (4/5/6/7) in the fan's bottom-right
+         * corner. Sized to read clearly at status bar size without crowding the fan dot.
+         */
+        const val WIFI_GENERATION_SIZE = 24f
+
+        /** The badge may not spread wider than this. */
+        const val WIFI_GENERATION_MAX_WIDTH = 30f
+
+        /** Horizontal centre of the badge — the fan's bottom-right corner. */
+        const val WIFI_GENERATION_X = 68f
+
+        /** Baseline of the badge — just below the fan's outermost arc. */
+        const val WIFI_GENERATION_BASELINE = 85f
 
         /** Width of one bar of the connecting animation. */
         const val CONNECT_BAR_WIDTH = 6.3f
@@ -312,6 +336,12 @@ class IndicatorRenderer {
             val dotRadius = SIGNAL_DOT_RADIUS * config.dotScale / 100f
             val ringRadius = ringRadius(dotRadius, spread, config)
 
+            // Everything inside the ring — the battery number, the corner badges, the
+            // Wi-Fi fan / network label and the traffic arrows — is lifted together by
+            // INNER_SHIFT units, while the outer ring (signal dots + battery arc) stays
+            // exactly where it is.
+            val innerSave = canvas.save()
+            canvas.translate(0f, -INNER_SHIFT)
             drawNumber(canvas, state, config, tint)
             // Top edge of the highest signal dot: the corner badges have to stay above it.
             val dotTop = RING_CENTER_Y +
@@ -331,18 +361,12 @@ class IndicatorRenderer {
             } else {
                 drawNetworkFallback(canvas, state, config, tint)
             }
+            canvas.restoreToCount(innerSave)
 
             drawSignalDots(canvas, state, config, tint, spread, dotRadius, ringRadius)
             drawBatteryArc(canvas, state, config, tint, battery, ringRadius)
 
             logSignalColumns(state, config)
-
-            if (config.showActivity) {
-                val act = if (state.wifiConnected || state.wifi == WifiPhase.CONNECTING) {
-                    state.wifiActivity
-                } else state.mobileActivity
-                drawActivityArrows(canvas, act, tint)
-            }
         } finally {
             canvas.restoreToCount(save)
         }
@@ -399,7 +423,7 @@ class IndicatorRenderer {
      */
     private fun drawNetworkLabel(
         canvas: Canvas, value: String, config: IndicatorConfig, tint: Int, ratio: Float = 1f,
-        alpha: Int = 255
+        alpha: Int = 255, yOffset: Float = 0f
     ) {
         val size = (NETWORK_LABEL_BASE_SIZE * config.textScale / 100f * ratio)
             .coerceIn(NETWORK_LABEL_MIN_SIZE, NETWORK_LABEL_MAX_SIZE)
@@ -407,7 +431,7 @@ class IndicatorRenderer {
         val bounds = Rect()
         paint.getTextBounds(value, 0, value.length, bounds)
         // Centred in the band, so the label sits in the middle of the dot ring.
-        val baseline = NETWORK_LABEL_CENTER - bounds.top - bounds.height() / 2f
+        val baseline = NETWORK_LABEL_CENTER - bounds.top - bounds.height() / 2f + yOffset
         canvas.drawText(value, 50f, baseline, paint)
     }
 
@@ -434,7 +458,7 @@ class IndicatorRenderer {
             }
             SimPhase.EMERGENCY -> drawNetworkLabel(canvas, "SOS", config, tint, EMERGENCY_SIZE_RATIO)
             SimPhase.ABSENT, SimPhase.DISABLED, SimPhase.LOCKED ->
-                drawNetworkLabel(canvas, "sim", config, tint, SIM_SIZE_RATIO, SIM_DIM_ALPHA)
+                drawNetworkLabel(canvas, "sim", config, tint, SIM_SIZE_RATIO, SIM_DIM_ALPHA, -2f)
             else -> drawPlaceholder(canvas, tint)
         }
     }
@@ -628,12 +652,31 @@ class IndicatorRenderer {
         fill(tint, if (faded) (dotAlpha * WIFI_MARKED_ALPHA_RATIO).toInt() else dotAlpha)
         canvas.drawCircle(50f, WIFI_CENTER_Y, 3.4f, paint)
         canvas.restoreToCount(wSave)
+        if (state.wifiGeneration >= 4) {
+            drawWifiGeneration(canvas, state.wifiGeneration, tint, faded)
+        }
         if (mark != null) {
             drawWifiMark(canvas, mark, tint)
         }
         if (state.wifi == WifiPhase.CONNECTING) {
             drawConnectingBars(canvas, tint, connectPhase)
         }
+    }
+
+    /**
+     * The Wi-Fi generation number (4/5/6/7) pinned to the fan's bottom-right corner.
+     *
+     * It reads as a corner badge, not a second headline: it sits just outside the
+     * outermost arc and grows as large as it can while staying clear of the fan's dot
+     * and the signal-dot ring below.
+     */
+    private fun drawWifiGeneration(canvas: Canvas, generation: Int, tint: Int, faded: Boolean) {
+        val value = generation.toString()
+        val size = WIFI_GENERATION_SIZE
+        val alpha = if (faded) (255 * WIFI_MARKED_ALPHA_RATIO).toInt() else 255
+        prepareText(value, size, withAlpha(tint, alpha), WIFI_GENERATION_MAX_WIDTH)
+        val baseline = WIFI_GENERATION_BASELINE
+        canvas.drawText(value, WIFI_GENERATION_X, baseline, paint)
     }
 
     /**
@@ -818,18 +861,6 @@ class IndicatorRenderer {
             path.close()
             fill(color); c.drawPath(path, paint)
         } finally { c.restoreToCount(save) }
-    }
-
-    /** Up/down traffic arrows: down = receiving (IN), up = transmitting (OUT). */
-    private fun drawActivityArrows(canvas: Canvas, act: DataActivity, tint: Int) {
-        stroke(tint, 2.2f, if (act.hasIn) 255 else 70)
-        path.reset()
-        path.moveTo(38f, 73f); path.lineTo(42f, 78f); path.lineTo(46f, 73f)
-        canvas.drawPath(path, paint)
-        stroke(tint, 2.2f, if (act.hasOut) 255 else 70)
-        path.reset()
-        path.moveTo(54f, 79f); path.lineTo(58f, 74f); path.lineTo(62f, 79f)
-        canvas.drawPath(path, paint)
     }
 
     private fun stroke(color: Int, width: Float, alpha: Int = 255) {

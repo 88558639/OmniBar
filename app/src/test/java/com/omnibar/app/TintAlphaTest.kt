@@ -31,8 +31,9 @@ class TintAlphaTest {
 
         val wifiOpaque = render(IndicatorState.demo, IndicatorConfig(), Color.WHITE)
         val wifiTranslucent = render(IndicatorState.demo, IndicatorConfig(), Color.argb(128, 255, 255, 255))
-        // The Wi-Fi fan's centre dot sits at (50, 70).
-        assertAlphaNear(wifiOpaque, wifiTranslucent, 150, 210)
+        // The Wi-Fi fan's centre dot sits at (50, 70) — shifted up by INNER_SHIFT.
+        val fanY = ((70f - IndicatorRenderer.INNER_SHIFT) * 3).toInt()
+        assertAlphaNear(wifiOpaque, wifiTranslucent, 150, fanY)
 
         val signalOpaque = render(IndicatorState.demo, IndicatorConfig(), Color.WHITE)
         val signalTranslucent = render(IndicatorState.demo, IndicatorConfig(), Color.argb(128, 255, 255, 255))

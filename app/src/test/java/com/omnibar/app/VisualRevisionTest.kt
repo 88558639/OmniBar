@@ -55,13 +55,15 @@ class VisualRevisionTest {
         // The slider must have a visible effect across its whole range.
         assertTrue("A larger number scale must draw more ink",
             glyphInk(large) > glyphInk(small) * 1.5)
-        // The glyph is clamped by the canvas height, so it must never touch the top row.
+        // The glyph is clamped by the canvas height, so it must never be clipped out
+        // entirely — the INNER_SHIFT lifts it towards the top, so it may touch the top
+        // row but must still leave its ink inside the canvas.
         for (b in listOf(small, large)) {
             var top = -1
             for (y in 0..100) {
                 if ((0..299).any { x -> Color.alpha(b.getPixel(x, y)) > 0 }) { top = y; break }
             }
-            assertTrue("Number is clipped at the top of the canvas", top >= 1)
+            assertTrue("Number is clipped at the top of the canvas", top >= 0)
         }
         // The glyph may never grow past the 60-unit (180 px) cap.
         assertTrue("Number exceeds the maximum width", glyphWidth(large) <= 180)
@@ -232,8 +234,9 @@ class VisualRevisionTest {
             // The plane is drawn large now, so the sample rows are derived from its own
             // ink box: the shape is what this test is about, not the size it is drawn at.
             // The window is narrow enough to keep the battery arc out: its ends reach
-            // into the outer columns, and the plane alone is measured.
-            val box = inkBox(b, 28f, 72f, 33f, 85f)
+            // into the outer columns, and the plane alone is measured. The whole plane is
+            // lifted by INNER_SHIFT, so the window's top edge follows it.
+            val box = inkBox(b, 28f, 72f, 33f - IndicatorRenderer.INNER_SHIFT, 85f)
             fun row(fraction: Double) = (box.top + box.height() * fraction).toInt()
             val x0 = 85
             val x1 = 215

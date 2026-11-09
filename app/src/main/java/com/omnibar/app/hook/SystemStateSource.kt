@@ -725,6 +725,11 @@ class SystemStateSource(
         val wifiLevel = if (wifiConnected) {
             WifiManager.calculateSignalLevel(rssi, 5).coerceIn(0, 4)
         } else 0
+        // Wi-Fi generation (4/5/6/7) from the negotiated 802.11 standard. Android 11+
+        // exposes it on WifiInfo.getWifiStandard(); below that it stays unknown (0).
+        val wifiGeneration = if (wifiConnected) {
+            runCatching { wifi?.connectionInfo?.wifiStandard ?: 0 }.getOrDefault(0).let { mapWifiGeneration(it) }
+        } else 0
 
         val defaultSub = SubscriptionManager.getDefaultDataSubscriptionId()
         // The user can move the data card between slots; follow it live so the left half
@@ -750,6 +755,7 @@ class SystemStateSource(
         current = current.copy(
             wifi = wifiPhase,
             wifiLevel = wifiLevel,
+            wifiGeneration = wifiGeneration,
             sim = simPhase,
             mobileLevel = primary?.level ?: 0,
             networkType = primary?.networkType ?: "",
@@ -932,5 +938,19 @@ class SystemStateSource(
 
         const val EXTRA_MAX_CHARGING_CURRENT = "max_charging_current"
         const val EXTRA_MAX_CHARGING_VOLTAGE = "max_charging_voltage"
+
+        /**
+         * Maps the negotiated 802.11 standard onto the Wi-Fi generation number the
+         * indicator shows (4/5/6/7). `WifiInfo.wifiStandard` returns the vendor
+         * constants `WIFI_STANDARD_11N` (4), `_11AC` (5), `_11AX` (6), `_11BE` (8);
+         * anything below 802.11n (legacy / unknown) maps to 0 so no badge is drawn.
+         */
+        fun mapWifiGeneration(standard: Int): Int = when (standard) {
+            4 -> 4   // 802.11n → Wi-Fi 4
+            5 -> 5   // 802.11ac → Wi-Fi 5
+            6 -> 6   // 802.11ax → Wi-Fi 6
+            8 -> 7   // 802.11be → Wi-Fi 7
+            else -> 0
+        }
     }
 }
