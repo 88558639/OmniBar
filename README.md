@@ -2,91 +2,64 @@
 
 <p align="center"><img src="app/src/main/res/drawable-nodpi/app_logo.png" width="96" alt="OmniBar Logo"></p>
 
-> **0.1.8 compat 预发布。** 基于 ColorOS 16 机型开发与验证，不是全机型支持声明；其他 Android/ColorOS 版本不作兼容保证。
+<p align="center"><strong>状态栏多合一 · ColorOS 17</strong></p>
 
-当前源码与 **0.1.8 compat 预发布版**一致；本轮真机验收待完成。新增行为与本地验证见 [0.1.8 更新说明](docs/releases/v0.1.8.md)。
+OmniBar 是需要 Root + LSPosed（或兼容 legacy Xposed 框架）的 Android 模块，在 ColorOS 17 状态栏原有的电量宿主内，绘制一个把**电量、Wi-Fi、蜂窝信号**揉在一起的状态指示器：外圈电量弧 + 中心 Wi-Fi/网络类型 + 底部信号点，一眼看清设备状态。
 
-[下载 APK 与校验文件](https://github.com/FangFangTu150/OmniBar/releases/tag/v0.1.8) · [提交问题](https://github.com/FangFangTu150/OmniBar/issues) · [安装与恢复](docs/INSTALL.md)
+> 本项目基于 [lingyired/status-trio](https://github.com/lingyired/status-trio) 二次改版，在其「电量环 + 信号」组合指示器的思路上重写并大幅扩展。
 
-OmniBar 是需要 Root/LSPosed（或兼容 legacy Xposed 框架）的 Android 模块，在 SystemUI 原有电池宿主内绘制电量、Wi-Fi 与蜂窝信号组合指示器。
+## 特性
 
-## 范围与边界
+### 状态栏指示器
 
-- 覆盖状态栏和锁屏；可显示电池环、充电/充满/插电未充电、低电量、省电、Wi-Fi 等级、无互联网/需登录、2G/3G/4G/5G、移动数据关闭、漫游、SIM 异常和飞行模式。
-- 不修改 QS（快捷设置）或 AOD，不注入其他应用，不提供遥测、常驻轮询、快充检测或性能模式检测。
-- 继承 SystemUI 父级防烧屏移动，但不能保证 OLED 不老化。
+- **外圈约 240° 电弧表示电量**，保留暗色底轨；未知电量不编造进度。
+- **中心 Wi-Fi** 用三道弧线 + 一个点，共四层信号等级；连接中的动画、无互联网/需登录的「!」「?」大字标注、未连接时的网络类型（2G/3G/4G/5G）或 `SOS`/`sim`/占位横条都集中在同一块区域。
+- **底部四点表示默认数据卡信号**；开启「双卡信号环」后，改为电池环底部的两段同心弧段分别表示主卡（外圈）与副卡（内圈）。
+- **漫游**用「R」标记 + 对应信号点/环段改用漫游色（默认蓝）区分。
+- **WiFi 代数显示**：连接 Wi-Fi 时在图标右下角标出当前代际 5/6/7/8，一眼判断连的是 WiFi 5 还是 WiFi 7。
+- 支持锁屏与状态栏同时显示；继承 SystemUI 父级防烧屏移动。
 
-## 0.1.6 兼容性范围
+### 状态配色
 
-| 项目 | 值 |
-| --- | --- |
-| 开发与验证范围 | ColorOS 16 / Android 16 / API 36 |
-| 本次真机验证 | 一加 13 / `PJZ110` / `PJZ110_16.0.10.501(CN01)` |
-| 开发与用户测试框架 | LSPosed Irena `1.9.2 (7249)`，API 100（非运行时版本 gate） |
-| 作用域 | 仅 `com.android.systemui` |
-| legacy Xposed | `minversion 93` |
+- **电池状态色**按优先级着色：充电/充满 → 严重低电量（默认 ≤10%）→ 低电量（默认 ≤20%）→ 省电模式 → 正常；数字和中心信号不强制变色。
+- **充电协议配色**严格按「电池检测 app」的「快充模式」文本判定，不读瞬时功率、不猜硬件：SuperVOOC 或原装百瓦 UFCS 档位 → 紫；第三方 UFCS / PPS → 绿；PD / DCP → 蓝；普通 / 慢充 → 橙。第三方充电器绝不因功率高而显示紫色。
+- 自定义颜色会按状态栏典型背景做 WCAG 可见性校正，保证对比度达标，原值仍保存。
 
-运行时不再按精确型号、固件构建号或 SystemUI 版本阻断；反射契约不满足或运行时异常时仍会回退原图标。项目仅基于 ColorOS 16 机型开发，其他 Android/ColorOS 版本不作保证；不同 ColorOS 16 机型仍需自行真机验收。
+### 更多标记
 
-## 配置默认值
+- **VPN** 连接时在电池环右上角显示盾形标记（可关闭）。
+- **充电闪电 / 充满对勾**位于电量弧顶部，周围局部渐变虚化，优先于所有数字模式。
+- 电量数字支持「始终显示」或「低于阈值自动显示」，互斥切换，可全部关闭。
 
-设置页共有 19 个持久化参数；越界数值会按实现边界收敛，颜色输入为 `#RRGGBB`。
+## 屏幕截图
 
-| 键 | 默认值 | 范围/含义 |
-| --- | --- | --- |
-| `enabled` | `false` | 启用系统替换 |
-| `lockscreen` | `true` | 锁屏显示 |
-| `size` | `22dp` | `16-32dp` |
-| `wifiScale` | `115%` | `70-150%` |
-| `textScale` | `150%` | 网络类型文字 `80-250%` |
-| `stroke` | `120%` | `60-160%` |
-| `dotScale` | `100%` | 信号点 `60-140%` |
-| `dotSpacing` | `100%` | 信号点间距 `70-125%` |
-| `horizontalPadding` | `2dp` | `0-8dp` |
-| `verticalOffset` | `0dp` | `-4..4dp` |
-| `colors` | `true` | 启用状态颜色 |
-| `chargingColor` | `#1CB753` | 充电与充满颜色 |
-| `lowColor` | `#E7433A` | 电量小于等于低阈值 |
-| `saverColor` | `#FFB300` | 省电模式 |
-| `lowThreshold` | `20%` | `5-50%`，含等于 |
-| `showNumber` | `false` | 始终显示电量数字 |
-| `numberScale` | `115%` | `75-250%` |
-| `autoNumber` | `false` | 低于或等于阈值自动显示 |
-| `numberThreshold` | `20%` | `1-100%`，含等于 |
+<p align="center">
+  <img src="docs/images/visual-0.1.4.png" width="420" alt="状态栏指示器效果">
+</p>
 
-0.1.8 起，常显与自动显示互斥，充电闪电和充满对勾始终优先于数字；旧配置两项均开启时保留常显。未知电量不会触发自动显示。有效百分比即使充放电状态为 UNKNOWN 仍可驱动进度和低电量逻辑，但不会伪造充电/充满/暂停标记。
-
-## 证据边界
-
-0.1.6 本地构建、Lint 和 55 项 JUnit/Robolectric 测试通过；一加 13 / `PJZ110` 真机验证已通过，但本地测试不执行真实 ART/Xposed hook，其他机型仍需单独验收。
-
-![离线状态效果图](docs/images/visual-0.1.4.png)
-
-![离线启动图效果](docs/images/launcher-0.1.3.png)
-
-<p align="center"><img src="docs/images/settings-light.png" width="340" alt="设置页浅色离线截图"></p>
+<p align="center">
+  <img src="docs/images/settings-light.png" width="300" alt="设置页浅色">
+  <img src="docs/images/settings-dark.png" width="300" alt="设置页深色">
+</p>
 
 ## 安装与恢复
 
-1. 安装或覆盖 `0.1.6 compat`，不要清除数据。
+1. 安装或覆盖最新 APK，不要清除数据。
 2. LSPosed 只勾选 `com.android.systemui`，不要选 Android Framework 或所有应用。
-3. 启用作用域后重新打开 OmniBar，让激活前设置迁移到共享目录；应用默认关闭替换。
-4. 重启 SystemUI 或设备，刷新诊断后再启用替换。应用不会自动重启。
-5. 异常时先在应用中关闭/恢复原图标；若应用打不开，在 LSPosed 停用 OmniBar 后重启。反复崩溃时使用现有 Root/LSPosed 安全恢复流程。
+3. 启用作用域后重新打开 OmniBar，让激活前设置迁移到共享目录。
+4. 重启 SystemUI 或设备，再启用替换。
+5. 异常时先在应用内关闭替换/恢复原图标；应用打不开时，在 LSPosed 停用 OmniBar 后重启。
 
-`compat` 是非 debug APK，但使用现有 debug/test 签名以保持测试安装更新兼容；签名密钥不发布，跨签名覆盖安装会失败。
-
-详细文档：
+详细说明：
 
 - [安装、更新与恢复](docs/INSTALL.md)
 - [功能与设置参数](docs/SETTINGS.md)
 - [构建说明](docs/BUILD.md)
 - [功能边界与验收状态](docs/COMPATIBILITY.md)
-- [0.1.6 候选预发布说明](docs/releases/v0.1.6.md)
 - [更新日志](CHANGELOG.md)
 - [贡献指南](CONTRIBUTING.md)
 - [安全说明](SECURITY.md)
 
-作者：[Coolapk / 17348848](https://www.coolapk.com/u/17348848)
+## 许可证
 
-许可证：**暂未指定**。
+暂未指定。
