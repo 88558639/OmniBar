@@ -6,7 +6,7 @@
 
 OmniBar 是需要 Root + LSPosed（或兼容 legacy Xposed 框架）的 Android 模块，在 ColorOS 17 状态栏原有的电量宿主内，绘制一个把**电量、Wi-Fi、蜂窝信号**揉在一起的状态指示器：外圈电量弧 + 中心 Wi-Fi/网络类型 + 底部信号点，一眼看清设备状态。
 
-> 产品思路参考 [lingyired/status-trio](https://github.com/lingyired/status-trio)（macOS 菜单栏多合一状态指示器），Android 侧为独立重写实现，无代码继承。
+> 感谢 [lingyired/status-trio](https://github.com/lingyired/status-trio) 带来的「多合一状态指示器」创意。
 
 ## 特性
 
