@@ -13,13 +13,21 @@ android {
         versionCode = 20261109
         versionName = "2026.11.09"
     }
+    signingConfigs {
+        create("omnibar") {
+            storeFile = rootProject.file("signing/omnibar-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
     buildTypes {
         create("compat") {
             initWith(getByName("release"))
             isDebuggable = false
             isMinifyEnabled = false
             // Preserve update compatibility with the existing test installation.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("omnibar")
         }
     }
     compileOptions {

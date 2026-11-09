@@ -10,6 +10,7 @@ dist/
 机型适配/
 *.jks
 *.keystore
+!signing/omnibar-debug.keystore
 *.p12
 *.pfx
 *.pem

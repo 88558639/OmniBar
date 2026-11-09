@@ -176,10 +176,10 @@ class ChargeProtocolTest {
     }
 
     /**
-     * A third-party PPS charger is green. The 公牛 PD20W bug: a PPS charger must stay
+     * A third-party PPS charger is blue. The 公牛 PD20W bug: a PPS charger must stay
      * in its own tier and never jump to violet.
      */
-    @Test fun aThirdPartyPpsChargerStaysGreen() {
+    @Test fun aThirdPartyPpsChargerStaysPps() {
         assertEquals(
             ChargeProtocol.PPS,
             SystemStateSource.classifyFastCharging(voocIng = 0, ppsIng = 2, contractWatts = 30)
@@ -195,6 +195,80 @@ class ChargeProtocolTest {
         assertEquals(
             null,
             SystemStateSource.classifyFastCharging(voocIng = 0, ppsIng = 0, contractWatts = 120)
+        )
+    }
+
+    /** `14` is shared by UFCS and PPS; the IC flag and active USB port disambiguate it. */
+    @Test fun sharedCode14KeepsUfcsAndPpsApart() {
+        assertEquals(
+            ChargeProtocol.UFCS,
+            SystemStateSource.classifyChargeTechnology(
+                tech = "14", ppsIng = 3, usbActive = "C", ufcsTier = ChargeProtocol.UFCS
+            )
+        )
+        assertEquals(
+            ChargeProtocol.PPS,
+            SystemStateSource.classifyChargeTechnology(
+                tech = "14", ppsIng = 2, usbActive = "PD_PPS", ufcsTier = ChargeProtocol.UFCS
+            )
+        )
+        assertEquals(
+            ChargeProtocol.PPS,
+            SystemStateSource.classifyChargeTechnology(
+                tech = "14", ppsIng = 0, usbActive = "PD_PPS", ufcsTier = ChargeProtocol.UFCS
+            )
+        )
+        assertEquals(
+            null,
+            SystemStateSource.classifyChargeTechnology(
+                tech = "14", ppsIng = 0, usbActive = "C", ufcsTier = ChargeProtocol.UFCS
+            )
+        )
+        assertEquals(
+            ChargeProtocol.PPS,
+            SystemStateSource.classifyChargeTechnology(
+                tech = "PPS", ppsIng = 3, usbActive = "C", ufcsTier = ChargeProtocol.UFCS
+            )
+        )
+    }
+
+    /** A plain PD charger has no Oplus private flags; standard power_supply nodes decide. */
+    @Test fun plainPdChargerIsBlue() {
+        assertEquals(
+            ChargeProtocol.PD,
+            SystemStateSource.classifyUsbSupply("UNKNOWN", "USB_PD", fastCharge = false)
+        )
+        assertEquals(
+            ChargeProtocol.PD,
+            SystemStateSource.classifyUsbSupply("PD", "USB_PD", fastCharge = false)
+        )
+        assertEquals(
+            ChargeProtocol.PD,
+            SystemStateSource.classifyUsbSupply("DCP", "USB", fastCharge = false)
+        )
+        assertEquals(
+            ChargeProtocol.PPS,
+            SystemStateSource.classifyUsbSupply("PD_PPS", "USB_PD", fastCharge = false)
+        )
+        assertEquals(
+            null,
+            SystemStateSource.classifyUsbSupply("UNKNOWN", "", fastCharge = false)
+        )
+    }
+
+    /** The original SVOOC charger is a DCP port with the fast-charge rail still on. */
+    @Test fun originalSvoocChargerIsViolet() {
+        assertEquals(
+            ChargeProtocol.SUPER_VOOC,
+            SystemStateSource.classifyUsbSupply("DCP", "USB_DCP", fastCharge = true)
+        )
+        assertEquals(
+            ChargeProtocol.PD,
+            SystemStateSource.classifyUsbSupply("DCP", "USB_DCP", fastCharge = false)
+        )
+        assertEquals(
+            ChargeProtocol.PD,
+            SystemStateSource.classifyUsbSupply("PD", "USB_PD", fastCharge = true)
         )
     }
 }

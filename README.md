@@ -27,8 +27,8 @@ OmniBar 是需要 Root + LSPosed（或兼容 legacy Xposed 框架）的 Android 
 
 -  **充电协议配色**
 -  SuperVOOC 或原装百瓦 UFCS 档位 → 紫🟣；
--  第三方 UFCS / PPS → 绿🟢；
--  PD / DCP → 蓝🔵；
+-  第三方 UFCS → 绿🟢；
+-  PD / DCP / PPS → 蓝🔵；
 -  普通 / 慢充 → 橙🟠。
 -  第三方充电器绝不因功率高而显示紫色。
 -  也可自定义颜色。

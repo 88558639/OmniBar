@@ -111,7 +111,8 @@ class SystemStateSource(
      *
      * On most Oplus builds `charge_technology` carries the protocol name as a string
      * (VOOC / SUPERVOOC / UFCS / PPS / PD); on this PLK110 build it carries the
-     * vendor's integer code instead. Both forms are handled by `protocolFromSysfs`.
+     * integer `14`, a constant shared by UFCS / PPS / PD that identifies no
+     * protocol. Only the text form is used.
      */
     private val CHARGE_TECHNOLOGY_PATHS = listOf(
         "/sys/class/oplus_chg/battery/charge_technology"
@@ -131,6 +132,13 @@ class SystemStateSource(
     private val PPS_ING_PATH = "/sys/class/oplus_chg/battery/ppschg_ing"
 
     /**
+     * The fast-charge rail enable flag. It stays 1 on the original SVOOC charger even
+     * after the battery is full and `voocchg_ing` has dropped back to 0, which is what
+     * separates the proprietary DCP link from a plain DCP trickle charger.
+     */
+    private val FAST_CHARGE_PATH = "/sys/class/oplus_chg/battery/fast_charge"
+
+    /**
      * The negotiated contract's power ceiling — the number the 电池检测 app prints
      * inside the "快充模式" text as `UFCS(120.00W)`. It is the *contract* ceiling
      * (ppschg_power), not the instantaneous power: it stays at 120 W while the phone
@@ -145,8 +153,8 @@ class SystemStateSource(
 
     /**
      * Oplus sysfs node that carries the charge type as an integer (0 none, 2 normal,
-     * 8 VOOC-basic, 14 SuperVOOC, 16 PD …). The app's secondary protocol source when
-     * `charge_technology` cannot be read.
+     * 8 VOOC-basic, 16 PD …). A secondary protocol source when the IC flags and the
+     * standard power_supply nodes yield nothing.
      */
     private val CHARGE_TYPE_PATHS = listOf(
         "/sys/class/power_supply/battery/charge_type",
@@ -159,6 +167,14 @@ class SystemStateSource(
      * report "DCP" when the phone has dropped to a basic USB trickle.
      */
     private val USB_TYPE_PATH = "/sys/class/power_supply/usb/usb_type"
+
+    /**
+     * The standard Linux supply type (`USB_PD`, `USB`, `USB_C`, …). Unlike the Oplus
+     * private nodes this stays readable on a plain PD charger, where voocchg_ing /
+     * ppschg_ing / ppschg_power all read 0 and charge_technology holds the shared
+     * code 14.
+     */
+    private val USB_SUPPLY_TYPE_PATH = "/sys/class/power_supply/usb/type"
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {
@@ -240,18 +256,22 @@ class SystemStateSource(
     private fun readSysfsInt(path: String): Int? = readSysfsLine(path)?.toIntOrNull()
 
     /**
-     * Resolves the charging protocol to exactly what the 电池检测 app shows as
-     * "快充模式", and nothing else.
+     * Resolves the charging protocol, giving the phone's engineering mode
+     * (*#899# → 手动测试 → 充电测试 → 快充模式) priority over third-party apps.
      *
-     * The app's "快充模式" is `SVOOC` (the proprietary rail), `UFCS(120.00W)` (the
-     * original charger's UFCS handshake at its 100 W+ contract), plain `UFCS` (a
-     * third-party charger's downgraded UFCS), `PPS`, `PD` or `DCP`. The mapping is:
+     * 电池检测 app falls back to showing the active USB port token `[C]` as
+     * "快充模式 C" whenever it cannot decode the vendor's protocol code. When the
+     * sources disagree, the engineering-mode value wins — that is the real
+     * negotiated protocol. The integer `14` in `charge_technology` is shared by
+     * UFCS, PPS and plain PD alike, so it carries no protocol information.
      *
-     *  1. `voocchg_ing == 1`                  → SVOOC → violet
-     *  2. `ppschg_ing == 4` (UFCS)            → UFCS, tiered by the contract ceiling
-     *  3. `ppschg_ing == 2` (PPS)             → PPS → green
-     *  4. `charge_technology` / `usb_type` PD → PD → blue
-     *  5. DCP / plain USB                     → blue; nothing → orange
+     *  1. `charge_technology` SVOOC / UFCS / PPS / PD text → engineering mode
+     *  2. `voocchg_ing == 1`                  → SVOOC → violet
+     *  3. `ppschg_ing == 4/3` (UFCS)          → UFCS → green, tiered by the contract ceiling
+     *  4. `ppschg_ing == 2` (PPS)             → PPS → blue
+     *  5. `usb=[PD]`, `usb/type == USB_PD`    → PD → blue
+     *  6. `[DCP]` + `fast_charge == 1`        → SVOOC → violet
+     *  7. `[DCP]` without fast charge         → blue; nothing → orange
      *
      * The only wattage consulted is the *contract ceiling* (`ppschg_power`), and only
      * to split the two UFCS tiers — the original 120 W unit signs a 120 W contract, a
@@ -264,25 +284,31 @@ class SystemStateSource(
     private fun protocolFromSysfs(): ChargeProtocol? {
         val voocIng = readSysfsInt(VOOC_ING_PATH) ?: 0
         val ppsIng = readSysfsInt(PPS_ING_PATH) ?: 0
-        // 1) – 3) The proprietary rail and the public fast-charge standards. The UFCS
-        //    tier is decided by the contract ceiling, the number the "快充模式" text
-        //    itself prints as `UFCS(120.00W)`.
-        classifyFastCharging(voocIng, ppsIng, maxContractWatts())?.let { return it }
-        // 4) The protocol name the driver wrote out. A string carries the name
-        //    outright; an integer carries the vendor's code.
+        val contractWatts = maxContractWatts()
+        val ufcsTier = if (contractWatts >= ORIGINAL_CHARGER_WATTS)
+            ChargeProtocol.SUPER_VOOC else ChargeProtocol.UFCS
+        val usbActive = readUsbTypeActive().orEmpty()
+        val usbSupply = readSysfsLine(USB_SUPPLY_TYPE_PATH).orEmpty()
+        val fastCharge = readSysfsInt(FAST_CHARGE_PATH) == 1
+
+        // 原装私有轨优先，只有它能上紫。
+        if (voocIng == 1) return ChargeProtocol.SUPER_VOOC
+
+        // 1) charge_technology 只在它是文本协议名时有效。整数码 14 是 UFCS / PPS /
+        //    PD 共用的大类常量，三种协议都返回 14，绝不拿它反推协议。
         CHARGE_TECHNOLOGY_PATHS.firstNotNullOfOrNull { readSysfsLine(it) }?.let { tech ->
-            val up = tech.uppercase()
-            if (up.contains("SUPERVOOC") || up.contains("SVOOC") || up.contains("VOOC")) {
-                return ChargeProtocol.SUPER_VOOC
-            }
-            if (up.contains("UFCS")) return ChargeProtocol.UFCS
-            if (up.contains("PPS")) return ChargeProtocol.PPS
-            if (up.contains("PD")) return ChargeProtocol.PD
-            tech.toIntOrNull()?.let { return mapProtocolCode(it) }
+            classifyChargeTechnology(tech, ppsIng, usbActive, ufcsTier)?.let { return it }
         }
-        // 5) The active USB supply type. A plain port (DCP/SDP/CDP) is what the app
-        //    reports as "DCP" — the blue tone.
-        if (isBasicUsb(readUsbTypeActive())) return ChargeProtocol.PD
+
+        // 2) 充电 IC 标志位区分 UFCS (3/4) 与 PPS (2)。
+        classifyFastCharging(voocIng, ppsIng, contractWatts)?.let { return it }
+
+        // 3) 标准 Linux power_supply 节点。普通 PD 充电器上所有 Oplus 私有节点都是
+        //    0 / Unknown；原厂 SVOOC 满电后 voocchg_ing 归零，靠 DCP 端口 +
+        //    fast_charge=1 认出紫色轨。
+        classifyUsbSupply(usbActive, usbSupply, fastCharge)?.let { return it }
+
+        // 4) charge_type 的整数码（8 VOOC / 16 PD / 2 慢充）。
         CHARGE_TYPE_PATHS.firstNotNullOfOrNull { readSysfsInt(it) }?.let { type ->
             if (type > 0) return mapProtocolCode(type)
         }
@@ -304,10 +330,9 @@ class SystemStateSource(
     }
 
     /**
-     * Maps an Oplus `charge_technology` / `charge_type` integer code onto a protocol.
-     * These are the vendor's internal codes; on this PLK110 build `charge_technology`
-     * carries 14 for UFCS (matching `ppschg_ing == 4`), so the code is only a fallback
-     * for the named flags above.
+     * Maps an Oplus `charge_type` integer code onto a protocol (8 VOOC / 16 PD /
+     * 2 slow). `charge_technology` is deliberately not mapped: its code `14` is a
+     * shared UFCS / PPS / PD constant that never identifies a protocol.
      */
     private fun mapProtocolCode(code: Int): ChargeProtocol = when (code) {
         8 -> ChargeProtocol.SUPER_VOOC  // VOOC-basic — the proprietary OnePlus/OPPO rail
@@ -859,15 +884,76 @@ class SystemStateSource(
         }
 
         /**
+         * Reads the standard Linux power_supply nodes. On a plain PD charger every
+         * Oplus private node is 0 / Unknown and `charge_technology` stays at the
+         * shared code 14, so this is the only readable source — it is exactly what
+         * the 电池检测 app shows as "快充模式 PD".
+         *
+         * The original SVOOC charger also presents as a DCP port, but keeps
+         * `fast_charge=1` after `voocchg_ing` drops to 0 at full charge. That flag is
+         * what separates the proprietary violet rail from a plain DCP trickle.
+         */
+        fun classifyUsbSupply(
+            usbActive: String,
+            usbSupply: String,
+            fastCharge: Boolean
+        ): ChargeProtocol? {
+            val active = usbActive.uppercase()
+            val supply = usbSupply.uppercase()
+            return when {
+                active.contains("PD_PPS") -> ChargeProtocol.PPS
+                active.contains("PD") || supply.contains("USB_PD") ||
+                    supply.contains("PD_DRP") -> ChargeProtocol.PD
+                active.contains("DCP") || active.contains("SDP") || active.contains("CDP") ->
+                    if (fastCharge) ChargeProtocol.SUPER_VOOC else ChargeProtocol.PD
+                else -> null
+            }
+        }
+
+        /**
+         * Resolves the engineering-mode "快充模式" value into a protocol.
+         *
+         * The integer `14` in `charge_technology` is a shared UFCS / PPS / PD fast
+         * charge class — all three report it. It is only a hint to look elsewhere:
+         *
+         *   - `ppschg_ing == 3/4`, `usb = [C]`        → UFCS (酷态科 10 号 Ultra)
+         *   - `ppschg_ing == 2`,  `usb = [PD_PPS]`   → PPS
+         *   - `ppschg_ing == 0`                      → standard power_supply nodes
+         *
+         * Text protocol names win over the integer code.
+         */
+        fun classifyChargeTechnology(
+            tech: String,
+            ppsIng: Int,
+            usbActive: String,
+            ufcsTier: ChargeProtocol
+        ): ChargeProtocol? {
+            val up = tech.uppercase()
+            val usb = usbActive.uppercase()
+            return when {
+                up.contains("SUPERVOOC") || up.contains("SVOOC") || up.contains("VOOC") ->
+                    ChargeProtocol.SUPER_VOOC
+                up.contains("UFCS") -> ufcsTier
+                up.contains("PPS") -> ChargeProtocol.PPS
+                up.contains("PD") -> ChargeProtocol.PD
+                tech.trim() == "14" -> when {
+                    ppsIng == 3 || ppsIng == 4 -> ufcsTier
+                    ppsIng == 2 || usb.contains("PD_PPS") -> ChargeProtocol.PPS
+                    else -> null
+                }
+                else -> null
+            }
+        }
+
+        /**
          * Classifies the public fast-charge standards from the driver's flags.
          *
-         * This is the pure, testable core of `protocolFromSysfs`:
-         *
          *   - `voocIng == 1`  → the proprietary rail (SVOOC) → violet, unconditionally
-         *   - `ppsIng == 4`   → UFCS, tiered by the contract ceiling: the original
+         *   - `ppsIng == 4/3` → UFCS, tiered by the contract ceiling: the original
          *                       charger's 100 W+ handshake is violet, a third-party
-         *                       downgrade is green
-         *   - `ppsIng == 2`   → PPS → green
+         *                       downgrade is green. PLK110 reports 3 while the
+         *                       工程模式 shows UFCS (酷态科 10 号 Ultra, 44 W contract).
+         *   - `ppsIng == 2`   → PPS → blue
          *   - anything else    → null (fall through to the protocol-name / USB checks)
          *
          * The contract ceiling is the only wattage consulted, and only for the UFCS
@@ -882,8 +968,8 @@ class SystemStateSource(
         ): ChargeProtocol? {
             if (voocIng == 1) return ChargeProtocol.SUPER_VOOC
             return when (ppsIng) {
-                4 -> if (contractWatts >= ORIGINAL_CHARGER_WATTS) ChargeProtocol.SUPER_VOOC
-                     else ChargeProtocol.UFCS
+                4, 3 -> if (contractWatts >= ORIGINAL_CHARGER_WATTS) ChargeProtocol.SUPER_VOOC
+                        else ChargeProtocol.UFCS
                 2 -> ChargeProtocol.PPS
                 else -> null
             }

@@ -66,8 +66,8 @@ data class IndicatorConfig(
      *
      *   - the proprietary SuperVOOC/VOOC rail (only the original charger negotiates
      *     it) → violet
-     *   - UFCS and PPS, the public standards third-party chargers speak → green
-     *   - PD and plain DCP → blue
+     *   - UFCS, the public standard third-party chargers speak → green
+     *   - PPS and PD → blue
      *   - plain / slow charging, or a protocol that could not be read → orange
      *
      * There is deliberately no wattage or voltage in this mapping: promoting a UFCS

@@ -262,13 +262,13 @@ class MainActivity : Activity() {
         section("充电配色").apply {
             textRow("按充电协议自动配色", null)
             colorRow("原装充电器 · 紫", "voocColor", 0xFF9C6BFF.toInt())
-            colorRow("第三方 UFCS / PPS · 绿", "ufcsColor", 0xFF2ECC71.toInt())
-            colorRow("PD / DCP · 蓝", "ppsColor", 0xFF3B82F6.toInt())
+            colorRow("第三方 UFCS · 绿", "ufcsColor", 0xFF2ECC71.toInt())
+            colorRow("PD / DCP / PPS · 蓝", "ppsColor", 0xFF3B82F6.toInt())
             colorRow("普通 / 慢充 · 橙", "unknownColor", 0xFFF97316.toInt())
             hint("自动模式严格按「快充模式」上色：\n" +
                 "1. 快充模式为 SVOOC，或原装百瓦 UFCS 档位，紫\n" +
-                "2. 快充模式为第三方 UFCS、PPS，绿\n" +
-                "3. 快充模式为 PD、DCP，蓝\n" +
+                "2. 快充模式为第三方 UFCS，绿\n" +
+                "3. 快充模式为 PD、DCP、PPS，蓝\n" +
                 "4. 快充模式为普通、慢充，橙\n" +
                 "说明：\n" +
                 "1. 原装百瓦 UFCS 依据合同功率上限 100W 判断\n" +
@@ -334,6 +334,10 @@ class MainActivity : Activity() {
         新增 WiFi 代数显示（WiFi 图标右下角标 5/6/7/8）
         圈内元素整体上移，外圈不变
         「关于」改为「更新日志」
+        修复第三方 UFCS 充电器误判为橙色
+        修复 PPS 充电器误判为 UFCS 显示绿色
+        修复 PD 充电器误判为普通充电显示橙色
+        修复原厂 SVOOC 充电器误判为蓝色
 
         2026.11.05
         优化状态栏指示器渲染细节
