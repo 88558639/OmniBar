@@ -9,6 +9,7 @@ OmniBar 是需要 Root + LSPosed（或兼容 legacy Xposed 框架）的 Android 
 > 感谢 [lingyired/status-trio](https://github.com/lingyired/status-trio) 带来的「多合一状态指示器」创意。
 
 ## 特性
+仅在一加15，c17测试通过
 
 ### 状态栏指示器
 
@@ -21,9 +22,16 @@ OmniBar 是需要 Root + LSPosed（或兼容 legacy Xposed 框架）的 Android 
 
 ### 状态配色
 
-- **电池状态色**按优先级着色：充电/充满 → 严重低电量（默认 ≤10%）→ 低电量（默认 ≤20%）→ 省电模式 → 正常；数字和中心信号不强制变色。
-- **充电协议配色**严格按「电池检测 app」的「快充模式」文本判定，不读瞬时功率、不猜硬件：SuperVOOC 或原装百瓦 UFCS 档位 → 紫；第三方 UFCS / PPS → 绿；PD / DCP → 蓝；普通 / 慢充 → 橙。第三方充电器绝不因功率高而显示紫色。
-- 自定义颜色会按状态栏典型背景做 WCAG 可见性校正，保证对比度达标，原值仍保存。
+- **电池状态色**
+- 按优先级着色：充电/充满 → 严重低电量（默认 ≤10%）→ 低电量（默认 ≤20%）→ 省电模式 → 正常；数字和中心信号不强制变色。
+
+-  **充电协议配色**
+-  SuperVOOC 或原装百瓦 UFCS 档位 → 紫🟣；
+-  第三方 UFCS / PPS → 绿🟢；
+-  PD / DCP → 蓝🔵；
+-  普通 / 慢充 → 橙🟠。
+-  第三方充电器绝不因功率高而显示紫色。
+-  也可自定义颜色。
 
 ### 更多标记
 
@@ -33,11 +41,10 @@ OmniBar 是需要 Root + LSPosed（或兼容 legacy Xposed 框架）的 Android 
 
 ## 安装与恢复
 
-1. 安装或覆盖最新 APK，不要清除数据。
-2. LSPosed 只勾选 `com.android.systemui`，不要选 Android Framework 或所有应用。
-3. 启用作用域后重新打开 OmniBar，让激活前设置迁移到共享目录。
-4. 重启 SystemUI 或设备，再启用替换。
-5. 异常时先在应用内关闭替换/恢复原图标；应用打不开时，在 LSPosed 停用 OmniBar 后重启。
+1. 必须已root
+2. LSPosed 只勾选 `com.android.systemui`。
+3. 勾选作用域后重启手机。
+4. 删除模块重启手机，恢复原厂。
 
 详细说明：
 
