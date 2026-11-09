@@ -38,8 +38,8 @@ OmniBar 是需要 Root + LSPosed（或兼容 legacy Xposed 框架）的 Android 
 </p>
 
 <p align="center">
-  <img src="docs/images/settings-light.png" width="300" alt="设置页浅色">
-  <img src="docs/images/settings-dark.png" width="300" alt="设置页深色">
+  <img src="docs/images/settings-colors.jpg" width="300" alt="状态颜色设置">
+  <img src="docs/images/settings-charge.jpg" width="300" alt="充电配色设置">
 </p>
 
 ## 安装与恢复
