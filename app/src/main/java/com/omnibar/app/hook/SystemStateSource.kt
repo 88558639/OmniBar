@@ -104,6 +104,12 @@ class SystemStateSource(
     /** Last sysfs-derived protocol, so the diagnostic line does not repeat every tick. */
     private var lastSysfsProtocol: ChargeProtocol? = null
 
+    /** Settle window state: the protocol colour stays frozen until the sysfs inputs stop changing. */
+    private var pendingSignature: String? = null
+    private var pendingCount = 0
+    private var lastStableSignature: String? = null
+    private var settleActive = false
+
     /**
      * Oplus sysfs nodes that carry the "快充模式" protocol name. These are the exact
      * sources the 电池检测 app (`com.shellterm.batterycheck`) reads, so the indicator
@@ -176,6 +182,14 @@ class SystemStateSource(
      */
     private val USB_SUPPLY_TYPE_PATH = "/sys/class/power_supply/usb/type"
 
+    /**
+     * The charger HAL writes its final protocol decision here (UFCS = 6, unplugged = 0).
+     * Because it changes while the handshake is still running, it doubles as a
+     * "negotiation finished" signal: we only colour once it has stopped moving.
+     */
+    private val PROTOCOL_TYPE_PATH = "/sys/class/oplus_chg/common/protocol_type"
+    private val FAST_CHG_TYPE_PATH = "/sys/class/oplus_chg/usb/fast_chg_type"
+
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {
             if (intent?.action == Intent.ACTION_BATTERY_CHANGED) {
@@ -185,7 +199,7 @@ class SystemStateSource(
                 // Unplugged: the next charger starts its own session.
                 if (current.batteryPhase == BatteryPhase.NORMAL) peakWatts = 0
                 refreshChargerTelemetry()
-                applyProtocol()
+                onChargeUpdate()
                 emit()
             }
         }
@@ -222,7 +236,7 @@ class SystemStateSource(
             // behind when the charger is unplugged, while the charger service reports
             // the current negotiation.
             oplusFastCharger = intent.readBoolean("chargefastcharger", oplusFastCharger)
-            applyProtocol()
+            onChargeUpdate()
             emit()
         }
     }
@@ -366,21 +380,94 @@ class SystemStateSource(
         return type.contains("DCP") || type.contains("SDP") || type.contains("CDP")
     }
 
-    private fun applyProtocol() {
+    /**
+     * Entry point for every charging update. Real-time fields still refresh immediately,
+     * but the protocol colour is frozen until the charger negotiation settles.
+     *
+     * Plugging a UFCS charger in goes through a PD/PPS phase first: the active USB port
+     * briefly reads `[PD_PPS]` and `ppschg_ing` is still 0, which used to paint blue for
+     * a moment before jumping to green. Colouring only once the whole sysfs signature has
+     * been identical for [SETTLE_SAMPLES] ticks removes that wrong intermediate colour
+     * no matter which charger or cable is used, without adding another protocol rule.
+     */
+    private fun onChargeUpdate() {
         val charging = current.batteryPhase in setOf(BatteryPhase.CHARGING, BatteryPhase.FULL)
-        // The Oplus driver's "快充模式" text is the authoritative protocol; only fall
-        // back to the broadcast heuristic when it is unavailable (non-Oplus firmware)
-        // or the charger is idle (the node can hold a stale value).
-        val sysfs = if (charging) protocolFromSysfs() else null
-        val protocol = sysfs ?: detectProtocol()
-        if (protocol != current.chargeProtocol || oplusWatts != current.chargeWatts ||
-            sysfs != lastSysfsProtocol
-        ) {
+        current = current.copy(chargeWatts = oplusWatts)
+        if (!charging) {
+            handler.removeCallbacks(protocolSettle)
+            settleActive = false
+            pendingSignature = null
+            pendingCount = 0
+            lastStableSignature = null
+            // Keep chargeProtocol: outside CHARGING/FULL the renderer ignores it, so
+            // holding the last settled colour avoids a flash on the next plug-in.
+            return
+        }
+        if (protocolSignature() == lastStableSignature) return
+        ensureSettle()
+    }
+
+    private fun ensureSettle() {
+        if (settleActive || !running) return
+        settleActive = true
+        pendingSignature = null
+        pendingCount = 0
+        handler.post(protocolSettle)
+    }
+
+    private val protocolSettle = object : Runnable {
+        override fun run() {
+            if (!running) {
+                settleActive = false
+                return
+            }
+            if (current.batteryPhase !in setOf(BatteryPhase.CHARGING, BatteryPhase.FULL)) {
+                settleActive = false
+                return
+            }
+            val sig = protocolSignature()
+            pendingCount = settleCount(pendingSignature, pendingCount, sig)
+            pendingSignature = sig
+            if (pendingCount >= SETTLE_SAMPLES) {
+                val sysfs = protocolFromSysfs()
+                commitProtocol(sysfs ?: detectProtocol(), sysfs, sig)
+                lastStableSignature = sig
+                pendingSignature = null
+                pendingCount = 0
+                settleActive = false
+            } else {
+                handler.postDelayed(this, SETTLE_INTERVAL_MS)
+            }
+        }
+    }
+
+    /**
+     * Fingerprint of every sysfs input the classifier reads. A settled signature means
+     * the charger IC has stopped renegotiating, so the value read afterwards is final.
+     */
+    private fun protocolSignature(): String = settleSignature(
+        protocolType = readSysfsInt(PROTOCOL_TYPE_PATH),
+        fastChgType = readSysfsInt(FAST_CHG_TYPE_PATH),
+        chargeTechnology = CHARGE_TECHNOLOGY_PATHS.firstNotNullOfOrNull { readSysfsLine(it) },
+        voocIng = readSysfsInt(VOOC_ING_PATH) ?: 0,
+        ppsIng = readSysfsInt(PPS_ING_PATH) ?: 0,
+        contractWatts = maxContractWatts(),
+        fastCharge = readSysfsInt(FAST_CHARGE_PATH) == 1,
+        usbActive = readUsbTypeActive(),
+        usbSupply = readSysfsLine(USB_SUPPLY_TYPE_PATH),
+        chargeType = CHARGE_TYPE_PATHS.firstNotNullOfOrNull { readSysfsInt(it) }
+    )
+
+    /** Commits a settled protocol to the rendered state and logs the transition. */
+    private fun commitProtocol(protocol: ChargeProtocol, sysfs: ChargeProtocol?, signature: String) {
+        if (protocol != current.chargeProtocol || sysfs != lastSysfsProtocol) {
             val tech = CHARGE_TECHNOLOGY_PATHS.firstNotNullOfOrNull { readSysfsLine(it) } ?: "n/a"
             val type = CHARGE_TYPE_PATHS.firstNotNullOfOrNull { readSysfsLine(it) } ?: "n/a"
             val usbType = readUsbTypeActive() ?: "n/a"
             log(Log.INFO, "OmniBar",
                 "charge protocol=$protocol (sysfs=$sysfs node=[tech=$tech type=$type usb=$usbType]) " +
+                    "settle=[hal=${readSysfsInt(PROTOCOL_TYPE_PATH)}/${readSysfsInt(FAST_CHG_TYPE_PATH)} " +
+                    "samples=$pendingCount sig=$signature] " +
                     "negotiated=${negotiatedVoltageMv}mV/${negotiatedCurrentMa}mA " +
                     "oplus=[fastType=$oplusFastType ppsMode=$oplusPpsMode tech=$oplusChargeTechnology " +
                     "plugged=$oplusChargePlugged fast=$oplusFastCharger v=${oplusChargerVoltageMv}mV w=${oplusWatts}] " +
@@ -389,7 +476,10 @@ class SystemStateSource(
             )
             lastSysfsProtocol = sysfs
         }
-        current = current.copy(chargeProtocol = protocol, chargeWatts = oplusWatts)
+        if (protocol != current.chargeProtocol) {
+            current = current.copy(chargeProtocol = protocol)
+            emit()
+        }
     }
 
     /** Detects the charging protocol from the collected telemetry. */
@@ -514,7 +604,7 @@ class SystemStateSource(
             // negotiated protocol even if no battery broadcast fires mid-negotiation.
             if (current.batteryPhase in setOf(BatteryPhase.CHARGING, BatteryPhase.FULL)) {
                 refreshChargerTelemetry()
-                applyProtocol()
+                onChargeUpdate()
             }
             val rx = TrafficStats.getTotalRxBytes()
             val tx = TrafficStats.getTotalTxBytes()
@@ -578,6 +668,8 @@ class SystemStateSource(
             }
             ?: log(Log.INFO, "OmniBar", "no sticky battery broadcast received")
         current = current.copy(powerSave = power.isPowerSaveMode, airplane = isAirplane())
+        // Kick off the first settle window without waiting for the 1.5 s activity poll.
+        onChargeUpdate()
 
         registerSignalListeners()
         runCatching { subs.addOnSubscriptionsChangedListener(executor, subListener) }
@@ -589,6 +681,11 @@ class SystemStateSource(
     fun stop() {
         running = false
         handler.removeCallbacks(activityPoll)
+        handler.removeCallbacks(protocolSettle)
+        settleActive = false
+        pendingSignature = null
+        pendingCount = 0
+        lastStableSignature = null
         runCatching { context.unregisterReceiver(batteryReceiver) }
         runCatching { context.unregisterReceiver(miscReceiver) }
         runCatching { context.unregisterReceiver(oplusReceiver) }
@@ -802,6 +899,33 @@ class SystemStateSource(
     }
 
     companion object {
+        /** Sampling period of the negotiation settle window. */
+        const val SETTLE_INTERVAL_MS = 300L
+
+        /** Identical sysfs signatures required before a protocol becomes visible. */
+        const val SETTLE_SAMPLES = 4
+
+        /** Pure helper: consecutive identical signatures advance the settle counter. */
+        fun settleCount(previousSignature: String?, previousCount: Int, signature: String): Int =
+            if (previousSignature == signature) previousCount + 1 else 1
+
+        /** Pure helper: fingerprint of every sysfs input used by the classifier. */
+        fun settleSignature(
+            protocolType: Int?,
+            fastChgType: Int?,
+            chargeTechnology: String?,
+            voocIng: Int,
+            ppsIng: Int,
+            contractWatts: Int,
+            fastCharge: Boolean,
+            usbActive: String?,
+            usbSupply: String?,
+            chargeType: Int?
+        ): String = listOf(
+            protocolType, fastChgType, chargeTechnology, voocIng, ppsIng,
+            contractWatts, fastCharge, usbActive, usbSupply, chargeType
+        ).joinToString("|")
+
         /** `android.os.OplusBatteryManager.ACTION_ADDITIONAL_BATTERY_CHANGED`. */
         const val OPLUS_BATTERY_CHANGED = "android.intent.action.ADDITIONAL_BATTERY_CHANGED"
 

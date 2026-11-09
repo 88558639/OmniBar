@@ -330,6 +330,9 @@ class MainActivity : Activity() {
 
     /** 最近 10 次更新日志。 */
     private val CHANGELOG = """
+        2026.11.09pm00
+        修复更换充电器或充电线时颜色短暂显示为错误协议色
+
         2026.11.09
         新增 WiFi 代数显示（WiFi 图标右下角标 5/6/7/8）
         圈内元素整体上移，外圈不变

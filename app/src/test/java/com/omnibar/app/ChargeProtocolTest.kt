@@ -3,6 +3,8 @@ package com.omnibar.app
 import com.omnibar.app.hook.SystemStateSource
 import com.omnibar.app.model.ChargeProtocol
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -270,5 +272,44 @@ class ChargeProtocolTest {
             ChargeProtocol.PD,
             SystemStateSource.classifyUsbSupply("PD", "USB_PD", fastCharge = true)
         )
+    }
+
+    /**
+     * A UFCS charger briefly looks like PD while the handshake runs. The settle window
+     * must restart on that transition so the intermediate blue is never committed.
+     */
+    @Test fun settleWindowRestartsWhenHandshakeMoves() {
+        val pd = SystemStateSource.settleSignature(
+            protocolType = 2, fastChgType = 2, chargeTechnology = "14",
+            voocIng = 0, ppsIng = 0, contractWatts = 0, fastCharge = false,
+            usbActive = "PD", usbSupply = "USB_PD", chargeType = 0
+        )
+        val ufcs = SystemStateSource.settleSignature(
+            protocolType = 6, fastChgType = 6, chargeTechnology = "14",
+            voocIng = 0, ppsIng = 3, contractWatts = 44, fastCharge = true,
+            usbActive = "C", usbSupply = "USB_DCP", chargeType = 15
+        )
+        assertNotEquals(pd, ufcs)
+        assertEquals(1, SystemStateSource.settleCount(null, 0, pd))
+        assertEquals(2, SystemStateSource.settleCount(pd, 1, pd))
+        assertEquals(3, SystemStateSource.settleCount(pd, 2, pd))
+        assertEquals(1, SystemStateSource.settleCount(pd, 3, ufcs))
+        assertEquals(4, SystemStateSource.settleCount(ufcs, 3, ufcs))
+        assertTrue(4 >= SystemStateSource.SETTLE_SAMPLES)
+    }
+
+    /** Every sysfs input feeds the signature; one changed node restarts the window. */
+    @Test fun settleSignatureTracksEveryProtocolInput() {
+        fun sig(ppsIng: Int, hal: Int?, usb: String?) = SystemStateSource.settleSignature(
+            protocolType = hal, fastChgType = hal, chargeTechnology = "14",
+            voocIng = 0, ppsIng = ppsIng, contractWatts = 44, fastCharge = true,
+            usbActive = usb, usbSupply = "USB_DCP", chargeType = 15
+        )
+        val base = sig(3, 6, "C")
+        assertEquals(base, sig(3, 6, "C"))
+        assertNotEquals(base, sig(0, 6, "C"))
+        assertNotEquals(base, sig(3, 2, "C"))
+        assertNotEquals(base, sig(3, 6, "PD_PPS"))
+        assertNotEquals(base, sig(3, null, "C"))
     }
 }
