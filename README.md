@@ -34,10 +34,6 @@ OmniBar 是需要 Root + LSPosed（或兼容 legacy Xposed 框架）的 Android 
 ## 屏幕截图
 
 <p align="center">
-  <img src="docs/images/visual-0.1.4.png" width="420" alt="状态栏指示器效果">
-</p>
-
-<p align="center">
   <img src="docs/images/settings-colors.jpg" width="300" alt="状态颜色设置">
   <img src="docs/images/settings-charge.jpg" width="300" alt="充电配色设置">
 </p>
