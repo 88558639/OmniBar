@@ -7,29 +7,14 @@
 本项目基于 ColorOS 17 / Android 15 机型开发，已在一加 15 / `PLK110` 上验证；其他 Android/ColorOS 版本不作保证，其他机型需自行验收。当前框架为 libxposed API 102（LSPosed）。
 
 1. 从 [Releases](https://github.com/88558639/OmniBar/releases) 下载并校验最新 APK。
-2. 打开 OmniBar 检查预览。
-3. 在 LSPosed 启用模块，并且只选择 `com.android.systemui`。不要选择 Android Framework、所有应用或无关进程。
-4. 启用作用域后重新打开 OmniBar，使激活前保存的设置有机会迁移到共享目录；不要清除数据。
-5. 重启 SystemUI 或设备。应用不会自动重启。
-6. 刷新诊断，确认没有回退或状态异常，再阅读确认对话框并启用替换。
+2. 在 LSPosed 启用模块，并且只选择 `com.android.systemui`。
+3. 启用作用域后重手机。
+
 
 诊断回执只证明 SystemUI 读到了配置或报告了状态，不等于人工真机验收。状态不完整时模块会保留原图标。
 
-## 更新
-
-能打开应用时先关闭替换；不能打开时先在 LSPosed 停用模块。使用相同包名和相同的现有 debug/test 签名覆盖安装，不要清除数据：
-
-```powershell
-adb install -r dist/OmniBar-2026.11.06-compat.apk
-```
-
-更新后确认作用域仍只有 `com.android.systemui`，重启 SystemUI 或设备，再刷新诊断。签名不一致时停止，不要用卸载或清除数据绕过更新限制；项目不发布签名密钥。
-
 ## 恢复
 
-- 应用可用：关闭替换或点击“恢复原图标”，然后重启 SystemUI。
-- 应用不可用/SystemUI 异常：在 LSPosed 停用 OmniBar，再重启 SystemUI 或设备。
-- 仍然循环崩溃：使用现有 Root/LSPosed 的安全模式或恢复流程，在系统启动前停用模块。
-- OTA 或 SystemUI 版本变化后需重新进行真机验收；如果反射契约或运行时不兼容，模块会回退并保留原图标。
+- 删除模块，重启手机
 
 模块不自动获取 Root、不自动重启，不替换 QS/AOD，也不会把预览状态写入真实网络、电量或 SIM 状态。
