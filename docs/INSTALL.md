@@ -8,7 +8,7 @@
 
 1. 从 [Releases](https://github.com/88558639/OmniBar/releases) 下载并校验最新 APK。
 2. 在 LSPosed 启用模块，并且只选择 `com.android.systemui`。
-3. 启用作用域后重手机。
+3. 启用作用域后重启手机。
 
 
 诊断回执只证明 SystemUI 读到了配置或报告了状态，不等于人工真机验收。状态不完整时模块会保留原图标。
