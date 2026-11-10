@@ -330,6 +330,9 @@ class MainActivity : Activity() {
 
     /** 最近 10 次更新日志。 */
     private val CHANGELOG = """
+        2026.11.10pm01
+        桌面图标缩小 10%
+
         2026.11.09pm01
         修复静止时两侧信号格数反复增减
         构建脚本按版本名自动生成安装包文件名
