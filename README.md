@@ -39,6 +39,10 @@ OmniBar 是需要 Root + LSPosed（或兼容 legacy Xposed 框架）的 Android 
 - **充电闪电 / 充满对勾**位于电量弧顶部，周围局部渐变虚化，优先于所有数字模式。
 - 电量数字支持「始终显示」或「低于阈值自动显示」，互斥切换，可全部关闭。
 
+## 界面预览
+
+<p align="center"><img src="docs/screenshot.jpg" alt="OmniBar 应用界面"></p>
+
 ## 安装与恢复
 
 1. 必须已root
