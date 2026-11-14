@@ -144,7 +144,7 @@ class ColorOsAdapter(
 
         // Keep suppressed icons hidden even when SystemUI re-shows them.
         hookBefore(View::class.java, "setVisibility", Int::class.javaPrimitiveType!!) { c ->
-            if (changingVisibility) return@hookBefore null
+            if (changingVisibility || sessions.isEmpty()) return@hookBefore null
             val view = c.getThisObject() as View
             for (session in sessions.values) {
                 if (session.hidden.containsKey(view)) {
@@ -612,7 +612,7 @@ class ColorOsAdapter(
                 (!session.lockscreen || config.lockscreen)
             if (active) {
                 session.indicator.tint = resolveTint(session)
-                session.indicator.state = refineCharging()
+                session.indicator.state = refineCharging(session.host)
                 session.indicator.config = config
                 val width = (config.size * density(session.root)).toInt()
                 if (session.savedWidth == null) session.savedWidth = session.host.layoutParams?.width ?: -1
@@ -660,12 +660,12 @@ class ColorOsAdapter(
     }
 
     /** Refine the charging phase with the native ChargeStateModel (SuperVOOC aware). */
-    private fun refineCharging(): IndicatorState {
+    private fun refineCharging(host: ViewGroup): IndicatorState {
         val charging = nativeCharging ?: return state
         val fast = nativeFastCharging
         val wireless = nativeWirelessCharging
         return try {
-            val binding = batteryBinding?.get(sessions.values.firstOrNull()?.host) ?: return state
+            val binding = batteryBinding?.get(host) ?: return state
             val model = binding.javaClass.getField("\$viewModel").get(binding)
             val chargeState = chargeStateField?.get(model) ?: return state
             val isCharging = charging.invoke(chargeState) as? Boolean ?: false
@@ -818,17 +818,6 @@ class ColorOsAdapter(
             runCatching { session.host.removeView(session.indicator) }
         }
         sessions.clear()
-        changingVisibility = true
-        try {
-            sessions.values.forEach { session ->
-                session.hidden.toMap().forEach { (view, visibility) ->
-                    runCatching { view.visibility = visibility }
-                }
-                session.hidden.clear()
-            }
-        } finally {
-            changingVisibility = false
-        }
         log(Log.INFO, "OmniBar", "restored stock icons: $error")
         report()
     }
