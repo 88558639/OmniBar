@@ -24,10 +24,14 @@ class ConfigProvider : ContentProvider() {
 
     private fun allowed(): Boolean {
         val uid = Binder.getCallingUid()
-        // Read-only appearance config. Obviously allow root (0), shell (2000) and the owning
-        // app; also accept any system-range UID, because the Xposed framework (LSPosed) can
-        // mediate the cross-process call under its own UID rather than SystemUI's 1000.
-        return uid == 0 || uid == 2000 || uid == Process.myUid() || uid >= 1000
+        // Same gate as DiagnosticsProvider: only root, shell, the platform system UID,
+        // the owning app, and the SystemUI package (which hosts the module on ColorOS 17
+        // under its own shared UID) may read the config. The previous `uid >= 1000` check
+        // accidentally admitted every installed app (application UIDs start at 10000).
+        val packages = runCatching {
+            context?.packageManager?.getPackagesForUid(uid).orEmpty().toList()
+        }.getOrDefault(emptyList())
+        return allowedCaller(uid, packages, Process.myUid())
     }
 
     override fun query(
