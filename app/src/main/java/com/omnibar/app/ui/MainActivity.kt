@@ -352,6 +352,9 @@ class MainActivity : Activity() {
 
     /** 最近 10 次更新日志。 */
     private val CHANGELOG = """
+        2026.11.16pm02
+        调整更新进度条高度
+
         2026.11.16pm01
         新增应用内检查更新：发现新版本提醒、一键下载安装、镜像加速
         上下午打开各自动提醒一次，设置页新增「检查更新」按钮
@@ -630,54 +633,84 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showUpdateDialog(info: Updater.UpdateInfo) {
-        AlertDialog.Builder(this)
-            .setTitle("发现新版本 ${info.version}")
-            .setMessage(plainNotes(info.body).ifBlank { "有新版本可用，是否下载并安装？" })
-            .setNegativeButton("取消", null)
-            .setPositiveButton("下载") { _, _ -> startDownload(info) }
-            .show()
-    }
+    private fun dialogButton(text: String, bg: Int, fg: Int, onClick: () -> Unit): Button =
+        Button(this).apply {
+            this.text = text
+            textSize = 14f
+            setTextColor(fg)
+            background = rounded(bg, 16f)
+            isAllCaps = false
+            elevation = 0f
+            stateListAnimator = null
+            setOnClickListener { onClick() }
+        }
 
-    private fun startDownload(info: Updater.UpdateInfo) {
+    /** A card-style dialog matching the settings screen; returns the dialog and its panel. */
+    private fun updatePanel(title: String, accent: Int = palette.accent): Pair<Dialog, LinearLayout> {
         val dialog = Dialog(this).apply {
             window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             window?.setDimAmount(0.45f)
-            setCancelable(false)
         }
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = rounded(palette.surface, 24f)
-            setPadding(dp(20), dp(18), dp(20), dp(20))
+            setPadding(dp(22), dp(20), dp(22), dp(18))
         }
-        panel.addView(label("下载更新 ${info.version}", 16f, palette.ink).apply {
+        panel.addView(label(title, 18f, accent).apply {
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         })
+        dialog.setContentView(panel)
+        return dialog to panel
+    }
+
+    private fun LinearLayout.updateButtons(vararg buttons: Pair<String, () -> Unit>) {
+        val row = LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+            setPadding(0, dp(16), 0, 0)
+        }
+        buttons.forEachIndexed { index, (text, action) ->
+            val primary = index == buttons.size - 1
+            val bg = if (primary) palette.accent else palette.surfaceAlt
+            val fg = if (primary) palette.onAccent else palette.ink
+            row.addView(dialogButton(text, bg, fg, action),
+                LinearLayout.LayoutParams(-2, dp(42)).apply { marginStart = dp(8) })
+        }
+        addView(row, LinearLayout.LayoutParams(-1, -2))
+    }
+
+    private fun showUpdateDialog(info: Updater.UpdateInfo) {
+        val (dialog, panel) = updatePanel("发现新版本 ${info.version}")
+        val notes = plainNotes(info.body).ifBlank { "有新版本可用，是否下载并安装？" }
+        panel.addView(label(notes, 14f, palette.ink).apply {
+            setLineSpacing(dp(4).toFloat(), 1f)
+            setPadding(0, dp(12), 0, 0)
+        }, LinearLayout.LayoutParams(-1, -2))
+        panel.updateButtons(
+            "取消" to { dialog.dismiss() },
+            "下载" to { dialog.dismiss(); startDownload(info) }
+        )
+        dialog.show()
+        val metrics = resources.displayMetrics
+        dialog.window?.setLayout((metrics.widthPixels * 0.86f).toInt(), LinearLayout.LayoutParams.WRAP_CONTENT)
+    }
+
+    private fun startDownload(info: Updater.UpdateInfo) {
+        val (dialog, panel) = updatePanel("下载更新 ${info.version}", palette.ink)
+        dialog.setCancelable(false)
         val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             progress = 0
         }
-        panel.addView(bar, LinearLayout.LayoutParams(-1, dp(6)).apply { topMargin = dp(16) })
+        panel.addView(bar, LinearLayout.LayoutParams(-1, dp(10)).apply { topMargin = dp(16) })
         val status = label("准备下载…", 13f, palette.muted).apply { setPadding(0, dp(10), 0, 0) }
         panel.addView(status, LinearLayout.LayoutParams(-1, -2))
-        val cancel = Button(this).apply {
-            text = "取消"
-            textSize = 14f
-            setTextColor(palette.ink)
-            background = rounded(palette.surfaceAlt, 14f)
-            isAllCaps = false
-            elevation = 0f
-            stateListAnimator = null
-            setOnClickListener { Updater.cancelled = true; dialog.dismiss() }
-        }
-        panel.addView(cancel, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(16) })
-        dialog.setContentView(panel)
+        panel.addView(dialogButton("取消", palette.surfaceAlt, palette.ink) {
+            Updater.cancelled = true; dialog.dismiss()
+        }, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(16) })
         dialog.show()
         val metrics = resources.displayMetrics
-        dialog.window?.setLayout(
-            (metrics.widthPixels * 0.86f).toInt(),
-            (metrics.heightPixels * 0.4f).toInt()
-        )
+        dialog.window?.setLayout((metrics.widthPixels * 0.82f).toInt(), LinearLayout.LayoutParams.WRAP_CONTENT)
         downloadDialog = dialog
 
         val apkFile = File(cacheDir, "apk/update.apk")
@@ -701,22 +734,34 @@ class MainActivity : Activity() {
     }
 
     private fun showInstallDialog(info: Updater.UpdateInfo) {
-        AlertDialog.Builder(this)
-            .setTitle("下载完成")
-            .setMessage("${info.version} 已下载完成，是否立即安装？")
-            .setNegativeButton("取消", null)
-            .setPositiveButton("安装") { _, _ -> launchInstall() }
-            .show()
+        val (dialog, panel) = updatePanel("下载完成")
+        panel.addView(label("${info.version} 已下载完成，是否立即安装？", 14f, palette.ink).apply {
+            setLineSpacing(dp(4).toFloat(), 1f)
+            setPadding(0, dp(12), 0, 0)
+        }, LinearLayout.LayoutParams(-1, -2))
+        panel.updateButtons(
+            "取消" to { dialog.dismiss() },
+            "安装" to { dialog.dismiss(); launchInstall() }
+        )
+        dialog.show()
+        val metrics = resources.displayMetrics
+        dialog.window?.setLayout((metrics.widthPixels * 0.86f).toInt(), LinearLayout.LayoutParams.WRAP_CONTENT)
     }
 
     private fun launchInstall() {
         if (!Updater.canInstall(this)) {
-            AlertDialog.Builder(this)
-                .setTitle("需要安装权限")
-                .setMessage("请允许本应用「安装未知应用」，才能安装更新。")
-                .setNegativeButton("取消", null)
-                .setPositiveButton("去设置") { _, _ -> Updater.openInstallPermission(this) }
-                .show()
+            val (dialog, panel) = updatePanel("需要安装权限")
+            panel.addView(label("请允许本应用「安装未知应用」，才能安装更新。", 14f, palette.ink).apply {
+                setLineSpacing(dp(4).toFloat(), 1f)
+                setPadding(0, dp(12), 0, 0)
+            }, LinearLayout.LayoutParams(-1, -2))
+            panel.updateButtons(
+                "取消" to { dialog.dismiss() },
+                "去设置" to { dialog.dismiss(); Updater.openInstallPermission(this@MainActivity) }
+            )
+            dialog.show()
+            val metrics = resources.displayMetrics
+            dialog.window?.setLayout((metrics.widthPixels * 0.86f).toInt(), LinearLayout.LayoutParams.WRAP_CONTENT)
             return
         }
         Updater.install(this)
