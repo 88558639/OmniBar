@@ -155,7 +155,7 @@ class MainActivity : Activity() {
     private fun buildTopBar(): View {
         val bar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         bar.addView(ImageView(this).apply {
-            setImageResource(R.mipmap.ic_launcher)
+            setImageResource(R.drawable.app_logo)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             background = rounded(palette.surface, 12f)
             setPadding(dp(3), dp(3), dp(3), dp(3))
@@ -352,6 +352,9 @@ class MainActivity : Activity() {
 
     /** 最近 10 次更新日志。 */
     private val CHANGELOG = """
+        2026.11.16pm03
+        修复顶栏图标黑色边角
+
         2026.11.16pm02
         调整更新进度条高度
 
