@@ -10,8 +10,8 @@ android {
         applicationId = "com.omnibar.app"
         minSdk = 34
         targetSdk = 36
-        versionCode = 2026111602
-        versionName = "2026.11.16pm02"
+        versionCode = 2026111603
+        versionName = "2026.11.16pm03"
     }
     signingConfigs {
         create("omnibar") {
