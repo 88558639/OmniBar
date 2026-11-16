@@ -17,6 +17,8 @@ import com.omnibar.app.config.IndicatorConfig
 import com.omnibar.app.config.PreferenceMigration
 import com.omnibar.app.model.IndicatorState
 import com.omnibar.app.render.IndicatorView
+import com.omnibar.app.update.Updater
+import java.io.File
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -39,6 +41,9 @@ class MainActivity : Activity() {
     private lateinit var statusLabel: TextView
     private val handler = Handler(Looper.getMainLooper())
     private val writer = Executors.newSingleThreadExecutor()
+    private val updater = Executors.newSingleThreadExecutor()
+    private var checking = false
+    private var downloadDialog: Dialog? = null
     private var previewIndex = 0
     private var lastProbeToken: String? = null
 
@@ -96,6 +101,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         probe()
+        maybeAutoCheckUpdate()
     }
 
     override fun onDestroy() {
@@ -104,7 +110,10 @@ class MainActivity : Activity() {
             sync.run()
         }
         handler.removeCallbacksAndMessages(null)
+        Updater.cancelled = true
+        downloadDialog?.dismiss()
         writer.shutdown()
+        updater.shutdown()
         super.onDestroy()
     }
 
@@ -291,6 +300,19 @@ class MainActivity : Activity() {
             },
             LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(10) }
         )
+        content.addView(
+            Button(this).apply {
+                text = "检查更新"
+                textSize = 15f
+                setTextColor(palette.onAccent)
+                background = rounded(palette.accent, 18f)
+                isAllCaps = false
+                elevation = 0f
+                stateListAnimator = null
+                setOnClickListener { runCheck(manual = true) }
+            },
+            LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(8) }
+        )
     }
 
     /** The changelog sheet, styled to match the app instead of the stock alert dialog. */
@@ -330,6 +352,15 @@ class MainActivity : Activity() {
 
     /** 最近 10 次更新日志。 */
     private val CHANGELOG = """
+        2026.11.16pm01
+        新增应用内检查更新：发现新版本提醒、一键下载安装、镜像加速
+        上下午打开各自动提醒一次，设置页新增「检查更新」按钮
+
+        2026.11.14pm01
+        修复配置权限校验过宽
+        修复锁屏等宿主充电相位取值错误
+        清理故障回退冗余代码
+
         2026.11.10pm01
         桌面图标缩小 10%
 
@@ -572,6 +603,132 @@ class MainActivity : Activity() {
             else -> palette.surfaceAlt
         }
     }
+
+    // ------------------------------------------------------------------ update
+
+    /** One auto-check per half-day (am / pm); the manual button skips the gate. */
+    private fun maybeAutoCheckUpdate() {
+        if (checking || !Updater.shouldAutoCheck(this)) return
+        Updater.markAutoChecked(this)
+        runCheck(manual = false)
+    }
+
+    private fun runCheck(manual: Boolean) {
+        checking = true
+        updater.execute {
+            val info = Updater.check(this@MainActivity)
+            handler.post {
+                checking = false
+                if (isDestroyed) return@post
+                when {
+                    info != null -> showUpdateDialog(info)
+                    manual && Updater.lastError != null ->
+                        Toast.makeText(this@MainActivity, "检查失败：${Updater.lastError}", Toast.LENGTH_SHORT).show()
+                    manual -> Toast.makeText(this@MainActivity, "已是最新版本", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun showUpdateDialog(info: Updater.UpdateInfo) {
+        AlertDialog.Builder(this)
+            .setTitle("发现新版本 ${info.version}")
+            .setMessage(plainNotes(info.body).ifBlank { "有新版本可用，是否下载并安装？" })
+            .setNegativeButton("取消", null)
+            .setPositiveButton("下载") { _, _ -> startDownload(info) }
+            .show()
+    }
+
+    private fun startDownload(info: Updater.UpdateInfo) {
+        val dialog = Dialog(this).apply {
+            window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            window?.setDimAmount(0.45f)
+            setCancelable(false)
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(palette.surface, 24f)
+            setPadding(dp(20), dp(18), dp(20), dp(20))
+        }
+        panel.addView(label("下载更新 ${info.version}", 16f, palette.ink).apply {
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        })
+        val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progress = 0
+        }
+        panel.addView(bar, LinearLayout.LayoutParams(-1, dp(6)).apply { topMargin = dp(16) })
+        val status = label("准备下载…", 13f, palette.muted).apply { setPadding(0, dp(10), 0, 0) }
+        panel.addView(status, LinearLayout.LayoutParams(-1, -2))
+        val cancel = Button(this).apply {
+            text = "取消"
+            textSize = 14f
+            setTextColor(palette.ink)
+            background = rounded(palette.surfaceAlt, 14f)
+            isAllCaps = false
+            elevation = 0f
+            stateListAnimator = null
+            setOnClickListener { Updater.cancelled = true; dialog.dismiss() }
+        }
+        panel.addView(cancel, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(16) })
+        dialog.setContentView(panel)
+        dialog.show()
+        val metrics = resources.displayMetrics
+        dialog.window?.setLayout(
+            (metrics.widthPixels * 0.86f).toInt(),
+            (metrics.heightPixels * 0.4f).toInt()
+        )
+        downloadDialog = dialog
+
+        val apkFile = File(cacheDir, "apk/update.apk")
+        updater.execute {
+            val ok = Updater.download(info, apkFile) { pct ->
+                handler.post {
+                    if (isDestroyed) return@post
+                    bar.progress = pct
+                    status.text = "下载中 $pct%"
+                }
+            }
+            handler.post {
+                if (isDestroyed) return@post
+                dialog.dismiss()
+                downloadDialog = null
+                if (ok) showInstallDialog(info)
+                else if (!Updater.cancelled)
+                    Toast.makeText(this@MainActivity, "下载失败，请稍后重试", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun showInstallDialog(info: Updater.UpdateInfo) {
+        AlertDialog.Builder(this)
+            .setTitle("下载完成")
+            .setMessage("${info.version} 已下载完成，是否立即安装？")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("安装") { _, _ -> launchInstall() }
+            .show()
+    }
+
+    private fun launchInstall() {
+        if (!Updater.canInstall(this)) {
+            AlertDialog.Builder(this)
+                .setTitle("需要安装权限")
+                .setMessage("请允许本应用「安装未知应用」，才能安装更新。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("去设置") { _, _ -> Updater.openInstallPermission(this) }
+                .show()
+            return
+        }
+        Updater.install(this)
+    }
+
+    /** Lightly flattens GitHub's markdown release notes into plain text. */
+    private fun plainNotes(md: String): String =
+        md.lines()
+            .map { it.replace(Regex("^#{1,6}\\s*"), "").replace(Regex("^[-*]\\s*"), "• ") }
+            .filter { it.isNotBlank() }
+            .joinToString("\n")
+            .take(240)
 
     // ------------------------------------------------------------------ small helpers
 
