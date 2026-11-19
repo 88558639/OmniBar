@@ -352,8 +352,8 @@ class MainActivity : Activity() {
 
     /** 最近 10 次更新日志。 */
     private val CHANGELOG = """
-        2026.11.19pm01
-        优化检查更新提示：无更新时显示「暂无更新」
+        2026.11.19pm02
+        优化检查更新提示：无更新时显示「已是最新版本」
 
         2026.11.16pm03
         修复顶栏图标黑色边角
@@ -630,7 +630,7 @@ class MainActivity : Activity() {
                 checking = false
                 if (isDestroyed) return@post
                 if (info != null) showUpdateDialog(info)
-                else if (manual) Toast.makeText(this@MainActivity, "暂无更新", Toast.LENGTH_SHORT).show()
+                else if (manual) Toast.makeText(this@MainActivity, "已是最新版本", Toast.LENGTH_SHORT).show()
             }
         }
     }
