@@ -29,7 +29,7 @@ Windows 路径可使用正斜杠；请替换为自己的 SDK 路径。该文件�
 脚本执行 `assembleCompat`、`lintCompat`、`testCompatUnitTest`，并复制非 debug APK 到：
 
 ```text
-dist/OmniBar-2026.11.06-compat.apk
+dist/TopHalo-2026.11.06-compat.apk
 ```
 
 跳过本地测试：

@@ -4,18 +4,18 @@ plugins {
 }
 
 android {
-    namespace = "com.omnibar.app"
+    namespace = "io.github.TopHalo"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.omnibar.app"
+        applicationId = "io.github.TopHalo"
         minSdk = 34
         targetSdk = 36
-        versionCode = 2026112103
-        versionName = "2026.11.21am03"
+        versionCode = 2026112104
+        versionName = "2026.11.21am04"
     }
     signingConfigs {
-        create("omnibar") {
-            storeFile = rootProject.file("signing/omnibar-debug.keystore")
+        create("tophalo") {
+            storeFile = rootProject.file("signing/tophalo-debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
@@ -27,7 +27,7 @@ android {
             isDebuggable = false
             isMinifyEnabled = false
             // Preserve update compatibility with the existing test installation.
-            signingConfig = signingConfigs.getByName("omnibar")
+            signingConfig = signingConfigs.getByName("tophalo")
         }
     }
     compileOptions {

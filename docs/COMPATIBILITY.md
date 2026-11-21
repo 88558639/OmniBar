@@ -36,3 +36,12 @@
 | 真实 hook、锁屏、重启恢复、网络切换 | 仍需设备逐项验收 |
 
 公开文档不得把本地测试描述成全量真机验收，也不得宣传全机型支持。
+
+## 源码入口
+
+- `app/src/main/java/io/github/tophalo/config/IndicatorConfig.kt`：默认值和边界。
+- `app/src/main/java/io/github/tophalo/hook/ModuleEntry.kt`：gate、作用域宿主和回退。
+- `app/src/main/java/io/github/tophalo/hook/ColorOsAdapter.kt`：ColorOS 17 状态栏适配。
+- `app/src/main/java/io/github/tophalo/model/BatterySnapshot.kt`：电量解析。
+- `app/src/main/java/io/github/tophalo/hook/SystemStateSource.kt`：Wi-Fi/蜂窝/充电协议状态。
+- `app/src/main/AndroidManifest.xml`：Xposed 声明和刷新权限。

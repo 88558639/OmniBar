@@ -1,10 +1,10 @@
-# OmniBar
+# TopHalo
 
-<p align="center"><img src="app/src/main/res/drawable-nodpi/app_logo.png" width="96" alt="OmniBar Logo"></p>
+<p align="center"><img src="app/src/main/res/drawable-nodpi/app_logo.png" width="96" alt="TopHalo Logo"></p>
 
 <p align="center"><strong>状态栏多合一 · ColorOS 17</strong></p>
 
-OmniBar 是需要 Root + LSPosed（或兼容 legacy Xposed 框架）的 Android 模块，在 ColorOS 17 状态栏原有的电量宿主内，绘制一个把**电量、Wi-Fi、蜂窝信号**揉在一起的状态指示器：外圈电量弧 + 中心 Wi-Fi/网络类型 + 底部信号点，一眼看清设备状态。
+TopHalo 是需要 Root + LSPosed（或兼容 legacy Xposed 框架）的 Android 模块，在 ColorOS 17 状态栏原有的电量宿主内，绘制一个把**电量、Wi-Fi、蜂窝信号**揉在一起的状态指示器：外圈电量弧 + 中心 Wi-Fi/网络类型 + 底部信号点，一眼看清设备状态。
 
 > 致谢「多合一状态指示器」这一创意。
 
@@ -35,18 +35,20 @@ OmniBar 是需要 Root + LSPosed（或兼容 legacy Xposed 框架）的 Android 
 
 ### 更多标记
 
-自行发掘
+- **VPN** 连接时在电池环右上角显示盾形标记（可关闭）。
+- **充电闪电 / 充满对勾**位于电量弧顶部，周围局部渐变虚化，优先于所有数字模式。
+- 电量数字支持「始终显示」或「低于阈值自动显示」，互斥切换，可全部关闭。
 
 ## 界面预览
 
-<p align="center"><img src="docs/screenshot.jpg" alt="OmniBar 应用界面"></p>
+<p align="center"><img src="docs/screenshot.jpg" alt="TopHalo 应用界面"></p>
 
 ## 安装与恢复
 
 1. 必须已root
 2. LSPosed 只勾选 `com.android.systemui`。
 3. 勾选作用域后重启手机。
-4. 删除模块重启手机，即可恢复原厂电量图标。
+4. 删除模块重启手机，恢复原厂。
 
 详细说明：
 
