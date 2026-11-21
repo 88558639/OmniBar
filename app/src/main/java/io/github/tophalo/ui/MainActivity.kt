@@ -370,6 +370,7 @@ class MainActivity : Activity() {
     private val CHANGELOG = """
         2026.11.21pm01
         更名 TopHalo，包名改为 io.github.tophalo
+        升级须知：需卸载 OmniBar，重新勾选 TopHalo 作用域，并重启手机
 
         2026.11.21am03
         更新检查支持镜像兜底
