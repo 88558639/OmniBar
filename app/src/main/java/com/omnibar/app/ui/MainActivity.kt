@@ -352,6 +352,10 @@ class MainActivity : Activity() {
 
     /** 最近 10 次更新日志。 */
     private val CHANGELOG = """
+        2026.11.21am01
+        图标改为圆角并改用自适应图标
+        更新提示展示完整更新内容
+
         2026.11.19pm02
         优化检查更新提示：无更新时显示「已是最新版本」
 
@@ -775,7 +779,6 @@ class MainActivity : Activity() {
             .map { it.replace(Regex("^#{1,6}\\s*"), "").replace(Regex("^[-*]\\s*"), "• ") }
             .filter { it.isNotBlank() }
             .joinToString("\n")
-            .take(240)
 
     // ------------------------------------------------------------------ small helpers
 
