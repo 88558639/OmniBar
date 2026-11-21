@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.app.Dialog
 import android.content.*
+import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
@@ -43,6 +44,9 @@ class MainActivity : Activity() {
     private val writer = Executors.newSingleThreadExecutor()
     private val updater = Executors.newSingleThreadExecutor()
     private var checking = false
+    private lateinit var checkButton: LinearLayout
+    private lateinit var checkSpinner: ProgressBar
+    private lateinit var checkLabel: TextView
     private var downloadDialog: Dialog? = null
     private var previewIndex = 0
     private var lastProbeToken: String? = null
@@ -301,17 +305,28 @@ class MainActivity : Activity() {
             },
             LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(10) }
         )
+        checkSpinner = ProgressBar(this, null, android.R.attr.progressBarStyleSmall).apply {
+            val s = dp(18)
+            layoutParams = LinearLayout.LayoutParams(s, s).apply { marginEnd = dp(8) }
+            isIndeterminate = true
+            indeterminateTintList = ColorStateList.valueOf(palette.onAccent)
+            visibility = View.GONE
+        }
+        checkLabel = label("检查更新", 15f, palette.onAccent).apply {
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        checkButton = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            background = rounded(palette.accent, 18f)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { runCheck(manual = true) }
+            addView(checkSpinner)
+            addView(checkLabel)
+        }
         content.addView(
-            Button(this).apply {
-                text = "检查更新"
-                textSize = 15f
-                setTextColor(palette.onAccent)
-                background = rounded(palette.accent, 18f)
-                isAllCaps = false
-                elevation = 0f
-                stateListAnimator = null
-                setOnClickListener { runCheck(manual = true) }
-            },
+            checkButton,
             LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(8) }
         )
     }
@@ -353,6 +368,10 @@ class MainActivity : Activity() {
 
     /** 最近 10 次更新日志。 */
     private val CHANGELOG = """
+        2026.11.21am03
+        更新检查支持镜像兜底
+        检查更新按钮改为转圈样式
+
         2026.11.21am02
         新增更新 APK 缓存自清理
 
@@ -635,12 +654,22 @@ class MainActivity : Activity() {
         runCheck(manual = false)
     }
 
+    private fun setCheckingUi(checking: Boolean) {
+        checkButton.isEnabled = !checking
+        checkButton.alpha = if (checking) 0.8f else 1f
+        checkSpinner.visibility = if (checking) View.VISIBLE else View.GONE
+        checkLabel.text = if (checking) "检查更新中…" else "检查更新"
+    }
+
     private fun runCheck(manual: Boolean) {
+        if (checking) return
         checking = true
+        if (manual) setCheckingUi(true)
         updater.execute {
             val info = Updater.check(this@MainActivity)
             handler.post {
                 checking = false
+                if (manual) setCheckingUi(false)
                 if (isDestroyed) return@post
                 if (info != null) showUpdateDialog(info)
                 else if (manual) Toast.makeText(this@MainActivity, "已是最新版本", Toast.LENGTH_SHORT).show()

@@ -64,10 +64,24 @@ object Updater {
     }
 
     private fun fetchLatest(): UpdateInfo? {
+        // 直连优先，被劫持/超时时走加速镜像兜底（与下载逻辑一致）。
+        val urls = listOf(
+            "https://api.github.com/repos/$OWNER/$REPO/releases/latest",
+            "https://gh-proxy.com/https://api.github.com/repos/$OWNER/$REPO/releases/latest",
+        )
+        for (url in urls) {
+            val info = fetchLatestFrom(url)
+            if (info != null) return info
+            Log.i(TAG, "update check fallback: $url -> $lastError")
+        }
+        return null
+    }
+
+    private fun fetchLatestFrom(url: String): UpdateInfo? {
         return try {
-            val conn = (URL("https://api.github.com/repos/$OWNER/$REPO/releases/latest").openConnection() as HttpURLConnection).apply {
-                connectTimeout = 15_000
-                readTimeout = 15_000
+            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 12_000
+                readTimeout = 12_000
                 setRequestProperty("Accept", "application/vnd.github+json")
                 setRequestProperty("User-Agent", "OmniBar-Updater")
             }
@@ -97,7 +111,6 @@ object Updater {
             }
         } catch (e: Exception) {
             lastError = e.message
-            Log.i(TAG, "update check failed: ${e.javaClass.simpleName} ${e.message}")
             null
         }
     }
