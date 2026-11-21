@@ -101,6 +101,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         probe()
+        maybeCleanupApk()
         maybeAutoCheckUpdate()
     }
 
@@ -352,6 +353,9 @@ class MainActivity : Activity() {
 
     /** 最近 10 次更新日志。 */
     private val CHANGELOG = """
+        2026.11.21am02
+        新增更新 APK 缓存自清理
+
         2026.11.21am01
         图标改为圆角并改用自适应图标
         更新提示展示完整更新内容
@@ -618,6 +622,11 @@ class MainActivity : Activity() {
     }
 
     // ------------------------------------------------------------------ update
+
+    /** 下次打开时清理已安装的 APK 缓存（SHA 一致才删，安全）。 */
+    private fun maybeCleanupApk() {
+        updater.execute { Updater.cleanupInstalledApk(this@MainActivity) }
+    }
 
     /** One auto-check per half-day (am / pm); the manual button skips the gate. */
     private fun maybeAutoCheckUpdate() {

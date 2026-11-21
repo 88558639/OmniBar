@@ -10,6 +10,7 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -199,6 +200,39 @@ object Updater {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: ""
     } catch (e: Exception) {
         ""
+    }
+
+    /**
+     * Best-effort cleanup: on app start, if the cached APK matches the currently installed
+     * APK byte-for-byte, the download has already been installed, so delete the cache.
+     */
+    fun cleanupInstalledApk(context: Context) {
+        val cached = File(context.cacheDir, "apk/update.apk")
+        if (!cached.isFile) return
+        try {
+            val installed = context.packageManager
+                .getPackageInfo(context.packageName, 0)
+                .applicationInfo?.sourceDir
+            if (!installed.isNullOrEmpty() && sha256(File(installed)) == sha256(cached)) {
+                cached.delete()
+                Log.i(TAG, "cleaned installed apk cache")
+            }
+        } catch (e: Exception) {
+            // leave the cache in place on any failure
+        }
+    }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buf = ByteArray(8192)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                digest.update(buf, 0, n)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 
     /**
