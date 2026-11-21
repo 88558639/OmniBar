@@ -4,14 +4,14 @@ plugins {
 }
 
 android {
-    namespace = "io.github.TopHalo"
+    namespace = "io.github.tophalo"
     compileSdk = 36
     defaultConfig {
-        applicationId = "io.github.TopHalo"
+        applicationId = "io.github.tophalo"
         minSdk = 34
         targetSdk = 36
-        versionCode = 2026112104
-        versionName = "2026.11.21am04"
+        versionCode = 2026112105
+        versionName = "2026.11.21pm01"
     }
     signingConfigs {
         create("tophalo") {

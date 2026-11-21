@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <permission android:name="io.github.TopHalo.permission.REFRESH" android:protectionLevel="signature" />
-    <uses-permission android:name="io.github.TopHalo.permission.REFRESH" />
+    <permission android:name="io.github.tophalo.permission.REFRESH" android:protectionLevel="signature" />
+    <uses-permission android:name="io.github.tophalo.permission.REFRESH" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -37,19 +37,19 @@
         <!-- 供 SystemUI 进程读取外观配置；访问者在代码内按 UID 校验（仅 system/root/shell）。 -->
         <provider
             android:name=".config.ConfigProvider"
-            android:authorities="io.github.TopHalo.config"
+            android:authorities="io.github.tophalo.config"
             android:exported="true" />
 
         <!-- 供 SystemUI 回执运行状态；同样按 UID 校验。 -->
         <provider
             android:name=".config.DiagnosticsProvider"
-            android:authorities="io.github.TopHalo.diagnostics"
+            android:authorities="io.github.tophalo.diagnostics"
             android:exported="true" />
 
         <!-- 供系统安装器读取下载好的更新 APK（无第三方依赖，见 ApkProvider）。 -->
         <provider
             android:name=".update.ApkProvider"
-            android:authorities="io.github.TopHalo.apk"
+            android:authorities="io.github.tophalo.apk"
             android:exported="false"
             android:grantUriPermissions="true" />
     </application>
